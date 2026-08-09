@@ -1,0 +1,154 @@
+"""設定・スキャン・システム情報の API。"""
+
+from __future__ import annotations
+
+import shutil
+from typing import Any
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+
+from kotone import __version__
+from kotone.api.deps import Ctx
+from kotone.db import current_version
+from kotone.library.artists import CANDIDATE_SEPARATORS, analyze_separators
+from kotone.settings import spec_dicts
+
+router = APIRouter(tags=["system"])
+
+
+class SettingsPatch(BaseModel):
+    values: dict[str, Any]
+
+
+class ScanRequest(BaseModel):
+    #: True にすると変更が無いファイルも含めて全部読み直す
+    full: bool = False
+
+
+# ============================================================== 設定
+
+
+@router.get("/settings")
+def get_settings(ctx: Ctx) -> dict[str, Any]:
+    return {"values": ctx.settings.all(), "specs": spec_dicts()}
+
+
+@router.patch("/settings")
+async def update_settings(ctx: Ctx, body: SettingsPatch) -> dict[str, Any]:
+    try:
+        values = ctx.settings.update(body.values)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # 再生に影響する設定は即座に MPD へ反映する
+    if ctx.mpd.connected:
+        if {"crossfade_enabled", "crossfade_seconds"} & set(body.values):
+            await ctx.player.apply_crossfade()
+        if {
+            "loudness_enabled", "loudness_mode", "loudness_preamp_db",
+            "loudness_clip_prevention",
+        } & set(body.values):
+            await ctx.player._apply_loudness(await ctx.mpd.status())  # noqa: SLF001
+        await ctx.player.broadcast_state()
+
+    ctx.events.publish("settings", {"values": values})
+    return {"values": values, "specs": spec_dicts()}
+
+
+# ============================================================== スキャン
+
+
+@router.get("/scan")
+def scan_state(ctx: Ctx) -> dict[str, Any]:
+    return ctx.scan.state()
+
+
+@router.post("/scan", status_code=202)
+async def start_scan(ctx: Ctx, body: ScanRequest | None = None) -> dict[str, Any]:
+    try:
+        await ctx.scan.start(full=bool(body and body.full))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return ctx.scan.state()
+
+
+@router.get("/scan/analyze-artists")
+def analyze_artists(ctx: Ctx, limit: int = 5) -> dict[str, Any]:
+    """ライブラリ中の ARTIST 文字列から区切り文字の傾向を調べる（要件 3.6）。
+
+    ここで頻度の高い区切り文字を確認し、設定 ``artist_separators`` を
+    実データに合わせて調整する。
+    """
+    rows = ctx.db.query(
+        """
+        SELECT DISTINCT a.name AS name
+        FROM artists a
+        """
+    )
+    reports = analyze_separators(
+        (r["name"] for r in rows), CANDIDATE_SEPARATORS, max_examples=max(1, limit)
+    )
+    return {
+        "current": ctx.settings.get("artist_separators"),
+        "candidates": [
+            {"separator": r.separator, "count": r.count, "examples": r.examples}
+            for r in reports
+        ],
+        "artist_count": len(rows),
+    }
+
+
+# ============================================================ システム情報
+
+
+@router.get("/system")
+async def system_info(ctx: Ctx) -> dict[str, Any]:
+    mpd_stats: dict[str, Any] = {}
+    mpd_status: dict[str, Any] = {}
+    if ctx.mpd.connected:
+        try:
+            mpd_stats = await ctx.mpd.stats()
+            mpd_status = await ctx.mpd.status()
+        except Exception:  # pragma: no cover - 接続が切れた直後
+            pass
+
+    return {
+        "version": __version__,
+        "schema_version": current_version(ctx.db.conn),
+        "mpd": {
+            "connected": ctx.mpd.connected,
+            "host": f"{ctx.config.mpd_host}:{ctx.config.mpd_port}",
+            "stats": mpd_stats,
+            "audio": mpd_status.get("audio"),
+        },
+        "paths": {
+            "music_dir": str(ctx.config.music_dir),
+            "data_dir": str(ctx.config.data_dir),
+            "artwork_cache": str(ctx.config.artwork_cache_dir),
+        },
+        "tools": {
+            "rsgain": bool(shutil.which("rsgain")),
+            "ffmpeg": bool(shutil.which("ffmpeg")),
+            "morphological_analyzer": ctx.reading_available,
+        },
+        "storage": _disk_usage(str(ctx.config.data_dir)),
+        "library": ctx.repo.stats(),
+    }
+
+
+@router.get("/health")
+def health(ctx: Ctx) -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "mpd_connected": ctx.mpd.connected,
+        "scanning": ctx.scan.running,
+    }
+
+
+def _disk_usage(path: str) -> dict[str, int] | None:
+    try:
+        usage = shutil.disk_usage(path)
+    except OSError:  # pragma: no cover
+        return None
+    return {"total": usage.total, "used": usage.used, "free": usage.free}

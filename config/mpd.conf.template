@@ -1,0 +1,79 @@
+# kotone が生成する MPD 設定。
+# install.sh が @MUSIC_DIR@ / @DATA_DIR@ を実際のパスへ置換します。
+#
+# 既存の設定は /etc/mpd.conf.kotone-backup に退避されています。
+# 手で編集する場合は install.sh --no-mpd-config を使ってください。
+
+music_directory     "@MUSIC_DIR@"
+playlist_directory  "@DATA_DIR@/mpd/playlists"
+db_file             "@DATA_DIR@/mpd/tag_cache"
+state_file          "@DATA_DIR@/mpd/state"
+sticker_file        "@DATA_DIR@/mpd/sticker.sql"
+
+user                "mpd"
+bind_to_address     "localhost"
+port                "6600"
+
+# 家庭内 LAN 限定運用のため、MPD 自体は localhost にのみ bind する。
+# 外部からの操作は kotone のバックエンド経由になる（要件 4.3）。
+
+log_file            "syslog"
+log_level           "notice"
+
+auto_update         "no"
+# ライブラリの更新は kotone 側のスキャンから明示的に指示する。
+# 常時監視は SSD/USB メディアのスピンアップやログの肥大を招くため無効にする。
+
+# ---------------------------------------------------------------- 再生品質
+
+# ギャップレス再生のための設定（要件 3.1）
+gapless_mp3_playback "yes"
+
+# ReplayGain は使わない。ラウドネス補正は kotone のバックエンドが
+# SQLite に保持した計測値をもとに setvol で動的に適用する（要件 3.1）。
+replaygain          "off"
+
+# 音量はソフトウェアミキサーで扱う。
+# ラウドネス補正が setvol を使うため、ハードウェアミキサーだと
+# DAC 側のカーブに依存して補正が不正確になる。
+mixer_type          "software"
+
+# 曲間の無音を詰めない（原盤どおりに再生する）
+audio_buffer_size   "4096"
+
+# ---------------------------------------------------------------- 出力
+
+audio_output {
+    type            "alsa"
+    name            "USB DAC"
+
+    # ここを実機の DAC に合わせて変更してください。
+    #   aplay -l   で確認できます（例: "hw:1,0"）
+    # 既定では ALSA の default を使います。
+    # device        "hw:1,0"
+
+    # ビットパーフェクト再生のため、MPD 側でのリサンプリングを行わない
+    auto_resample   "no"
+    auto_format     "no"
+    auto_channels   "no"
+
+    # DSD を DoP (DSD over PCM) で送る場合は yes にしてください。
+    # ネイティブ DSD 対応 DAC では no のままで構いません（要件 4.1）。
+    dop             "no"
+
+    mixer_type      "software"
+}
+
+# HTTP ストリーミング等が必要になったらここに audio_output を追加します。
+
+# ---------------------------------------------------------------- デコーダ
+
+decoder {
+    plugin          "ffmpeg"
+    enabled         "yes"
+}
+
+input {
+    plugin          "curl"
+    enabled         "no"
+}

@@ -1,0 +1,46 @@
+[Unit]
+Description=kotone — 日本語ネイティブ音楽プレイヤー (バックエンド)
+Documentation=https://github.com/USER/kotone
+After=network-online.target mpd.service
+Wants=network-online.target
+# MPD が落ちていてもバックエンドは起動する（UI から状態を確認できるようにするため）
+After=sound.target
+
+[Service]
+Type=simple
+User=@USER@
+Group=@USER@
+WorkingDirectory=@PREFIX@
+EnvironmentFile=/etc/kotone/kotone.env
+ExecStart=@PREFIX@/backend/.venv/bin/kotone-backend
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=20
+
+# ログは journald に集約する（journalctl -u kotone で確認）
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=kotone
+
+# --- 静音・安定動作のための優先度設定（要件 4.2）---
+# 再生自体は MPD が行うので、バックエンドは控えめな優先度で動かす
+Nice=5
+IOSchedulingClass=best-effort
+IOSchedulingPriority=5
+
+# --- 権限の絞り込み ---
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+# ユーザーデータの書き込み先だけを許可する
+ReadWritePaths=@DATA_DIR@
+
+[Install]
+WantedBy=multi-user.target

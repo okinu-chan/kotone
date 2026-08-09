@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# /usr/local/bin/kotone-cli として配置される薄いラッパー。
+# 仮想環境のパスを意識せずに kotone-cli を呼べるようにする。
+set -euo pipefail
+
+PREFIX="${KOTONE_PREFIX:-/opt/kotone}"
+VENV="${PREFIX}/backend/.venv"
+
+if [[ ! -x "${VENV}/bin/kotone-cli" ]]; then
+  echo "kotone がインストールされていません: ${VENV}" >&2
+  exit 1
+fi
+
+# 設定は systemd と同じ EnvironmentFile から読む
+if [[ -f /etc/kotone/kotone.env ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  . /etc/kotone/kotone.env
+  set +a
+fi
+
+exec "${VENV}/bin/kotone-cli" "$@"

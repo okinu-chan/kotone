@@ -1,0 +1,22 @@
+# Raspberry Pi 上で実行するシェルスクリプトは必ず LF にする。
+# CRLF が混ざると `bash: bad interpreter` で動かなくなる。
+*.sh             text eol=lf
+*.service        text eol=lf
+*.template       text eol=lf
+*.sql            text eol=lf
+scripts/*        text eol=lf
+
+# 通常のテキストは Git の自動判定に任せる
+*.py             text
+*.js             text
+*.svelte         text
+*.css            text
+*.html           text
+*.json           text
+*.toml           text
+*.md             text
+
+# 生成物や画像はバイナリ扱い
+*.png            binary
+*.jpg            binary
+*.ico            binary

@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+#
+# kotone のアップデート（要件 5 章）。
+#
+#   sudo kotone-update
+#
+# git pull → 依存関係の更新 → DB マイグレーション → サービス再起動 の順で行う。
+# 自動更新は行わず、このコマンドを明示的に実行したときだけ更新される。
+# ユーザーデータ（DB・アートワークキャッシュ・設定）は git 管理外の
+# /var/lib/kotone 配下にあるため、更新で上書きされない。
+#
+set -euo pipefail
+
+PREFIX="${KOTONE_PREFIX:-/opt/kotone}"
+DATA_DIR="${KOTONE_DATA_DIR:-/var/lib/kotone}"
+SERVICE_USER="${KOTONE_USER:-kotone}"
+VENV="${PREFIX}/backend/.venv"
+
+GREEN=$'\033[32m'; YELLOW=$'\033[33m'; RED=$'\033[31m'; BOLD=$'\033[1m'; RESET=$'\033[0m'
+info() { printf '%s==>%s %s\n' "${GREEN}${BOLD}" "${RESET}" "$*"; }
+warn() { printf '%s警告:%s %s\n' "${YELLOW}${BOLD}" "${RESET}" "$*" >&2; }
+die()  { printf '%sエラー:%s %s\n' "${RED}${BOLD}" "${RESET}" "$*" >&2; exit 1; }
+
+[[ $EUID -eq 0 ]] || die "root で実行してください（sudo kotone-update）"
+[[ -d "${PREFIX}/.git" ]] || die "${PREFIX} が git リポジトリではありません。install.sh を実行してください。"
+
+# ---------------------------------------------------------- バックアップ
+
+info "DB をバックアップします"
+if [[ -f "${DATA_DIR}/library.sqlite3" ]]; then
+  sudo -u "$SERVICE_USER" "${VENV}/bin/kotone-cli" backup || warn "バックアップに失敗しました"
+fi
+
+# ---------------------------------------------------------------- 取得
+
+CURRENT="$(git -C "$PREFIX" rev-parse --short HEAD)"
+info "更新を取得します（現在: ${CURRENT}）"
+
+if ! git -C "$PREFIX" diff --quiet HEAD 2>/dev/null; then
+  warn "ローカルに変更があります。git stash してから続行します。"
+  git -C "$PREFIX" stash push -u -m "kotone-update $(date -Iseconds)" || true
+fi
+
+git -C "$PREFIX" pull --ff-only
+
+UPDATED="$(git -C "$PREFIX" rev-parse --short HEAD)"
+if [[ "$CURRENT" == "$UPDATED" ]]; then
+  info "すでに最新です（${CURRENT}）。依存関係とマイグレーションだけ確認します。"
+else
+  info "${CURRENT} → ${UPDATED} に更新しました"
+  git -C "$PREFIX" --no-pager log --oneline "${CURRENT}..${UPDATED}" | head -20
+fi
+
+chown -R "${SERVICE_USER}:${SERVICE_USER}" "$PREFIX"
+
+# ------------------------------------------------------------ 依存関係
+
+info "Python の依存関係を更新します"
+"${VENV}/bin/pip" install --quiet --upgrade pip wheel
+"${VENV}/bin/pip" install --quiet --upgrade "${PREFIX}/backend"
+
+# ------------------------------------------------------- マイグレーション
+
+info "DB マイグレーションを適用します"
+sudo -u "$SERVICE_USER" "${VENV}/bin/kotone-cli" migrate
+
+# ------------------------------------------------------------ 再起動
+
+info "サービスを再起動します"
+systemctl daemon-reload
+systemctl restart kotone
+
+sleep 2
+if systemctl is-active --quiet kotone; then
+  info "アップデートが完了しました（${UPDATED}）"
+else
+  die "サービスが起動しませんでした。journalctl -u kotone -n 50 を確認してください。"
+fi

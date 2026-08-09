@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Node / frontend build intermediates
+frontend/node_modules/
+frontend/.vite/
+
+# NOTE: frontend/dist/ is intentionally NOT ignored.
+# ビルド済み静的ファイルはリポジトリに含め、Pi 上でのビルドを不要にする
+# (要件定義書 4.7 / 5 章)。
+
+# ローカル開発用データ (本番は /var/lib/kotone/ 配下)
+/var/
+data/
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
