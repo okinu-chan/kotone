@@ -36,6 +36,7 @@
         'loudness_concurrency',
       ],
       note: '計測済みの曲は再スキャンでも測り直しません。中断しても続きから再開できます。',
+      loudnessActions: true,
     },
     {
       title: 'ライブラリ',
@@ -63,6 +64,15 @@
   let system = $state(null);
   let separatorReport = $state(null);
   let analyzing = $state(false);
+  let loudness = $state(null);
+
+  async function refreshLoudness() {
+    try {
+      loudness = await api.loudnessProgress();
+    } catch {
+      /* 起動直後などは無視してよい */
+    }
+  }
 
   $effect(() => {
     if (!settings.loaded) settings.load();
@@ -73,6 +83,13 @@
       })
       .catch(() => {});
     scan.refresh();
+    refreshLoudness();
+  });
+
+  // 計測が終わったら残り曲数を更新する
+  $effect(() => {
+    void scan.running;
+    refreshLoudness();
   });
 
   function specFor(key) {
@@ -152,6 +169,33 @@
     <section class="card">
       <h2>{group.title}</h2>
       {#if group.note}<p class="note dim">{group.note}</p>{/if}
+
+      {#if group.loudnessActions}
+        <div class="loudness-actions">
+          {#if loudness}
+            <p class="stats dim tabular">
+              計測済み {loudness.measured} / {loudness.total} 曲
+              {#if loudness.remaining > 0}（未計測 {loudness.remaining} 曲）{/if}
+            </p>
+          {/if}
+          {#if scan.running}
+            <p class="dim">スキャン／計測の実行中です。</p>
+          {:else}
+            <div class="buttons">
+              <button
+                class="primary"
+                onclick={() => scan.startLoudness(false)}
+                disabled={loudness ? loudness.remaining === 0 : false}
+              >
+                未計測の曲を計測
+              </button>
+              <button class="ghost" onclick={() => scan.startLoudness(true)}>
+                すべて測り直す
+              </button>
+            </div>
+          {/if}
+        </div>
+      {/if}
 
       {#each group.keys as key (key)}
         {@const spec = specFor(key)}
@@ -450,6 +494,10 @@
   .error {
     color: var(--danger);
     font-size: 12px;
+  }
+
+  .loudness-actions {
+    padding-bottom: 8px;
   }
 
   .analyze {

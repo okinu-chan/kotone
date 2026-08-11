@@ -73,6 +73,44 @@ async def start_scan(ctx: Ctx, body: ScanRequest | None = None) -> dict[str, Any
     return ctx.scan.state()
 
 
+class LoudnessScanRequest(BaseModel):
+    #: True にすると計測済みの曲も測り直す
+    remeasure: bool = False
+
+
+@router.post("/scan/loudness", status_code=202)
+async def start_loudness_scan(
+    ctx: Ctx, body: LoudnessScanRequest | None = None
+) -> dict[str, Any]:
+    """ラウドネス計測だけを実行する（要件 3.1）。
+
+    通常のライブラリスキャンとは分離してある。曲数が多いと十数時間かかるため、
+    取り込みを先に終わらせて再生できる状態にしてから、任意のタイミングで走らせる。
+    未計測の曲だけを対象にするので、中断しても続きから再開できる。
+    """
+    try:
+        await ctx.scan.start_loudness(remeasure=bool(body and body.remeasure))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return ctx.scan.state()
+
+
+@router.get("/scan/loudness")
+def loudness_progress(ctx: Ctx) -> dict[str, Any]:
+    """計測の進み具合（未計測の残り曲数）。"""
+    total = int(ctx.db.scalar("SELECT COUNT(*) FROM tracks") or 0)
+    measured = int(
+        ctx.db.scalar("SELECT COUNT(*) FROM tracks WHERE gain_scanned_at IS NOT NULL") or 0
+    )
+    return {
+        "total": total,
+        "measured": measured,
+        "remaining": max(0, total - measured),
+        "running": ctx.scan.running,
+        "state": ctx.scan.state(),
+    }
+
+
 @router.get("/scan/analyze-artists")
 def analyze_artists(ctx: Ctx, limit: int = 5) -> dict[str, Any]:
     """ライブラリ中の ARTIST 文字列から区切り文字の傾向を調べる（要件 3.6）。

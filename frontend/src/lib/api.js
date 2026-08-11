@@ -121,6 +121,8 @@ export const api = {
   system: () => get('/system'),
   scanState: () => get('/scan'),
   startScan: (full = false) => post('/scan', { full }),
+  startLoudnessScan: (remeasure = false) => post('/scan/loudness', { remeasure }),
+  loudnessProgress: () => get('/scan/loudness'),
   analyzeArtists: () => get('/scan/analyze-artists'),
 };
 

@@ -42,6 +42,34 @@ class ScanManager:
         self._loop = asyncio.get_running_loop()
         self._task = asyncio.create_task(self._run(full=full), name="library-scan")
 
+    async def start_loudness(self, *, remeasure: bool = False) -> None:
+        """ラウドネス計測だけをバックグラウンドで走らせる。"""
+        if self.running:
+            raise RuntimeError("すでにスキャンが実行中です")
+        self._loop = asyncio.get_running_loop()
+        self._task = asyncio.create_task(
+            self._run_loudness(remeasure=remeasure), name="loudness-scan"
+        )
+
+    async def _run_loudness(self, *, remeasure: bool) -> ScanResult:
+        ctx = self._ctx
+        ctx.events.publish("scan", {"status": "running", "phase": "ラウドネスを計測中",
+                                    "processed": 0, "total": 0})
+        try:
+            scanner = LibraryScanner(
+                db=ctx.db,
+                config=ctx.config,
+                settings=ctx.settings,
+                progress=self._publish_progress,
+            )
+            result = await asyncio.to_thread(scanner.measure_loudness, remeasure=remeasure)
+        except Exception as exc:
+            log.exception("ラウドネス計測が失敗しました")
+            ctx.events.publish("scan", {"status": "error", "error": str(exc)})
+            raise
+        ctx.events.publish("scan", {"status": "idle", **result.as_dict()})
+        return result
+
     async def _run(self, *, full: bool) -> ScanResult:
         ctx = self._ctx
         ctx.events.publish("scan", {"status": "running", "phase": "開始", "processed": 0,

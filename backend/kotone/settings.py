@@ -93,9 +93,11 @@ SETTING_SPECS: tuple[SettingSpec, ...] = (
         "オンにすると \"The Beatles\" が B の位置に並びます。",
     ),
     SettingSpec(
-        "rsgain_enabled", True, "スキャン時にラウドネスを計測する", "bool",
-        "rsgain が無い場合は FFmpeg (ebur128) で計測します。"
-        "計測済みの曲は再スキャンでも測り直しません。",
+        "rsgain_enabled", False, "スキャン時にラウドネスを計測する", "bool",
+        "オンにすると通常のライブラリスキャンでラウドネスも計測します。"
+        "計測は 1 曲あたり数秒かかり、18,000 曲規模では十数時間になるため既定はオフです。"
+        "オフのままでも、設定画面の「ラウドネスを計測」ボタンや "
+        "`kotone-cli measure-loudness` でいつでも実行できます（中断・再開可）。",
     ),
     SettingSpec(
         "use_replaygain_tags", True, "ファイルの ReplayGain タグを使う", "bool",

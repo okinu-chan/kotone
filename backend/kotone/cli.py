@@ -2,6 +2,7 @@
 
     kotone-cli migrate            DB マイグレーションを適用
     kotone-cli scan [--full]      ライブラリスキャン
+    kotone-cli measure-loudness   ラウドネス計測（中断・再開可）
     kotone-cli analyze-artists    ARTIST タグの区切り文字を調査（要件 3.6）
     kotone-cli rebuild-readings   読み仮名とソートキーを作り直す
     kotone-cli backup             SQLite DB のバックアップを取る
@@ -47,6 +48,12 @@ def main(argv: list[str] | None = None) -> int:
     analyze_parser.add_argument("--examples", type=int, default=5)
     analyze_parser.add_argument("--json", action="store_true")
 
+    loudness_parser = sub.add_parser(
+        "measure-loudness", help="ラウドネス計測だけを実行する（中断・再開可）"
+    )
+    loudness_parser.add_argument("--remeasure", action="store_true",
+                                 help="計測済みの曲も measure し直す")
+
     sub.add_parser("rebuild-readings", help="読み仮名とソートキーを作り直す")
     sub.add_parser("backup", help="SQLite DB のバックアップを取る")
     sub.add_parser("stats", help="ライブラリの統計を表示する")
@@ -79,6 +86,13 @@ def _dispatch(args: argparse.Namespace, db: Database, config) -> int:  # noqa: A
     if args.command == "scan":
         scanner = LibraryScanner(db, config, settings, progress=_print_progress)
         result = scanner.scan(full=args.full)
+        print()
+        print(json.dumps(result.as_dict(), ensure_ascii=False, indent=2))
+        return 0
+
+    if args.command == "measure-loudness":
+        scanner = LibraryScanner(db, config, settings, progress=_print_progress)
+        result = scanner.measure_loudness(remeasure=args.remeasure)
         print()
         print(json.dumps(result.as_dict(), ensure_ascii=False, indent=2))
         return 0

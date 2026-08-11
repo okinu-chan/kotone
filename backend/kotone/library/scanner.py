@@ -78,6 +78,8 @@ class LibraryScanner:
         self._ignore_article = bool(settings.get("ignore_leading_article"))
         self._separators = list(settings.get("artist_separators") or [])
         self._use_tag_gain = bool(settings.get("use_replaygain_tags"))
+        # 通常スキャン中に計測するかどうか。measure_loudness() では強制的に有効にする
+        self._loudness_enabled = bool(settings.get("rsgain_enabled"))
         # 名前 -> id のキャッシュ（1 回のスキャン中だけ有効）
         self._artist_ids: dict[str, int] = {}
         self._genre_ids: dict[str, int] = {}
@@ -124,7 +126,9 @@ class LibraryScanner:
             self.db.commit()
 
             self._scan_artwork(dirty_albums, result, full=full)
-            self._scan_loudness(dirty_albums, result, full=full)
+            # 既定ではここで計測しない（設定 rsgain_enabled がオフのため）。
+            # 計測は measure_loudness() で任意のタイミングに実行する。
+            self._scan_loudness(result)
             self.db.commit()
 
         except Exception as exc:
@@ -142,6 +146,33 @@ class LibraryScanner:
                 result.added, result.updated, result.unchanged, result.removed,
                 result.duration_seconds,
             )
+        return result
+
+    # ==================================================== ラウドネス計測（単独）
+
+    def measure_loudness(self, *, remeasure: bool = False) -> ScanResult:
+        """ラウドネス計測だけを実行する（要件 3.1）。
+
+        通常のライブラリスキャンとは切り離してあるので、曲数の多いライブラリでは
+        取り込みを先に済ませて再生できる状態にし、計測は後から好きなときに走らせる
+        運用ができる。未計測の曲だけを対象にするため、中断しても続きから再開できる。
+        """
+        started = time.monotonic()
+        result = ScanResult()
+        # このメソッドは明示的に呼ばれるので、設定のオン／オフによらず計測する
+        self._loudness_enabled = True
+        self._set_state(status="running", phase="ラウドネスを計測中", processed=0,
+                        total=0, started_at=True, error=None)
+        try:
+            self._scan_loudness(result, remeasure=remeasure)
+            self.db.commit()
+        except Exception as exc:
+            log.exception("ラウドネス計測が失敗しました")
+            self._set_state(status="error", phase="", error=str(exc), finished_at=True)
+            raise
+        else:
+            result.duration_seconds = time.monotonic() - started
+            self._set_state(status="idle", phase="", finished_at=True)
         return result
 
     # =============================================================== 走査
@@ -579,7 +610,7 @@ class LibraryScanner:
     # ============================================================ ラウドネス
 
     def _scan_loudness(
-        self, dirty_albums: set[int], result: ScanResult, *, full: bool, remeasure: bool = False
+        self, result: ScanResult, *, remeasure: bool = False
     ) -> None:
         """未計測の曲だけラウドネスを計測する。
 
@@ -587,14 +618,13 @@ class LibraryScanner:
         測り直さない（18,000 曲規模で全曲再計測すると数時間かかるため）。
         本当に測り直したい場合だけ ``remeasure=True`` を指定する。
         """
-        del dirty_albums  # 計測済みかどうかだけで判断する
         scanner = LoudnessScanner(
-            enabled=bool(self.settings.get("rsgain_enabled")),
+            enabled=self._loudness_enabled,
             concurrency=int(self.settings.get("loudness_concurrency") or 0),
             true_peak=bool(self.settings.get("loudness_true_peak")),
         )
         if not scanner.available:
-            if self.settings.get("rsgain_enabled"):
+            if self._loudness_enabled:
                 log.warning(
                     "rsgain も FFmpeg も見つからないため、ラウドネス計測をスキップします"
                 )

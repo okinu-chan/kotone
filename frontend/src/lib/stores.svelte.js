@@ -128,6 +128,15 @@ class ScanStore {
       toast.error(error.detail || String(error));
     }
   }
+
+  async startLoudness(remeasure = false) {
+    try {
+      this.update(await api.startLoudnessScan(remeasure));
+      toast.info('ラウドネスの計測を開始しました（中断しても続きから再開できます）');
+    } catch (error) {
+      toast.error(error.detail || String(error));
+    }
+  }
 }
 
 export const scan = new ScanStore();
