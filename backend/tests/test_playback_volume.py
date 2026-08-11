@@ -163,6 +163,7 @@ async def test_warmup_mutes_then_seeks_back_to_start(db, settings) -> None:
     mpd = FakeMPD(state="stop")
     mpd.volume = 40
     ctrl = PlaybackController(mpd, db, FakeRepo({}), settings, EventBus())
+    ctrl.user_volume = 45
     settings.set("startup_warmup_ms", 50)
 
     await ctrl._start_with_warmup(3)
@@ -172,7 +173,25 @@ async def test_warmup_mutes_then_seeks_back_to_start(db, settings) -> None:
     assert mpd.calls[0][1] == 0        # まず無音にする
     assert mpd.calls[1][1] == 3        # 指定位置から再生
     assert mpd.calls[2][1] == 0        # 曲頭へ戻す
-    assert mpd.calls[3][1] == 40       # 元の音量へ戻す
+    # 最後は「元の音量」ではなく、いまの曲に対する実効音量を計算し直した値
+    assert mpd.calls[3][1] == 45
+
+
+async def test_warmup_does_not_clobber_loudness_applied_meanwhile(db, settings) -> None:
+    """ウォームアップ中に idle 経由で適用された補正値を上書きしない（実機で発覚）。"""
+    mpd = FakeMPD(state="stop")
+    repo = FakeRepo(
+        {"a.flac": {"track_gain_db": -4.83, "track_peak": 0.9,
+                    "album_gain_db": -4.83, "album_peak": 0.9}}
+    )
+    ctrl = PlaybackController(mpd, db, repo, settings, EventBus())
+    settings.set("startup_warmup_ms", 30)
+    settings.set("volume_control", "external")
+
+    await ctrl._start_with_warmup(0)
+
+    # 100 * 10^(-4.83/20) = 57
+    assert mpd.volume == 57
 
 
 async def test_warmup_skipped_when_already_playing(db, settings) -> None:

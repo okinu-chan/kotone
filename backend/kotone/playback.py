@@ -421,7 +421,6 @@ class PlaybackController:
             await self.mpd.play(position)
             return
 
-        previous_volume = _int_or_none(status.get("volume"))
         try:
             await self.mpd.set_volume(0)          # ウォームアップ中は無音にする
             self._expected_volume = 0
@@ -429,10 +428,11 @@ class PlaybackController:
             await asyncio.sleep(warmup_ms / 1000)
             await self.mpd.seek(0)                # デバイスが開いた状態で曲頭へ戻す
         finally:
-            # 音量はこの後 _apply_loudness が曲に応じて設定し直す
-            if previous_volume is not None:
-                await self.mpd.set_volume(previous_volume)
-                self._expected_volume = previous_volume
+            # 音量は「元の値」ではなく、いま鳴っている曲に対する実効音量を
+            # 計算し直して設定する。ウォームアップ中の sleep で idle イベントが
+            # 走り、_apply_loudness が既に正しい値を入れていることがあるため、
+            # 元の値へ戻すとそれを上書きしてしまう。
+            await self._apply_loudness(await self.mpd.status())
 
     # ============================================================ 音量
 
