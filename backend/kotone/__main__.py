@@ -22,6 +22,10 @@ def main() -> None:
         access_log=False,
         ws_ping_interval=20,
         ws_ping_timeout=30,
+        # 停止時のグレースフルシャットダウンを有界化する。既定は無制限で、
+        # keep-alive 接続などを待ち続けて systemd の TimeoutStopSec に達し
+        # SIGKILL される（systemctl restart / kotone-update が毎回遅くなる）。
+        timeout_graceful_shutdown=5,
     )
 
 

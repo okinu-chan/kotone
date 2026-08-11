@@ -406,7 +406,13 @@ class PlaybackController:
         await self.broadcast_state()
 
     async def _reconcile_external_volume(self) -> None:
-        """他クライアント等が音量を変えた場合に、ユーザー音量を追随させる。"""
+        """他クライアント等が音量を変えた場合に、その値を新しいユーザー基準にする。
+
+        ここでラウドネス係数で割り戻すと、直前に再生していたトラックのゲインに
+        依存して user_volume が変動（例: ゲイン +3.95dB のトラック後に外部で 20 に
+        すると 20÷1.58≈13 になる）してしまうため、割り戻さずに観測値をそのまま
+        採用する。ラウドネス補正は次のトラック切り替え時に改めて適用される。
+        """
         status = await self.mpd.status()
         try:
             observed = int(status.get("volume", -1))
@@ -415,9 +421,8 @@ class PlaybackController:
         if observed < 0 or self._expected_volume is None:
             return
         if observed == self._expected_volume:
-            return
-        factor = await self._current_factor()
-        self.user_volume = max(0, min(100, round(observed / factor))) if factor else observed
+            return  # 自分の setvol による mixer イベントは無視する
+        self.user_volume = max(0, min(100, observed))
         self._expected_volume = observed
         self._persist_state()
 
@@ -429,11 +434,13 @@ class PlaybackController:
             current = int(status.get("volume", -1))
         except (TypeError, ValueError):
             current = -1
+        # 期待値は setvol より先に記録する。set_volume が発する mixer idle
+        # イベントが _reconcile_external_volume に「外部変更」と誤認されて
+        # 音量がドリフトするのを防ぐ（記録前にイベントが処理されるレース対策）。
+        self._expected_volume = effective
         if current == effective:
-            self._expected_volume = effective
             return
         await self.mpd.set_volume(effective)
-        self._expected_volume = effective
 
     async def _current_factor(self) -> float:
         """現在の曲に適用すべき音量倍率。補正が無効なら 1.0。"""
