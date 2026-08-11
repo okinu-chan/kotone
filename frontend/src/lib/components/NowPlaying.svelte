@@ -94,7 +94,7 @@
     role="img"
     aria-label={track ? `${track.title} のアルバムアート` : 'アルバムアート'}
   >
-    <AlbumArt {album} tier="large" alt="" rounded={false} square={false} eager />
+    <AlbumArt {album} tier="large" alt="" square={false} eager />
   </div>
 
   <div class="meta">
@@ -262,10 +262,9 @@
     touch-action: pan-y;
   }
 
+  /* 角丸にはせず、余白も塗らない（原盤のジャケットをそのまま出す） */
   .art-wrap :global(.art) {
-    border-radius: var(--radius-lg);
     overflow: hidden;
-    box-shadow: 0 12px 40px rgb(0 0 0 / 0.35);
   }
 
   .meta {

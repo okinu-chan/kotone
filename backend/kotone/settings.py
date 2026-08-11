@@ -119,9 +119,15 @@ SETTING_SPECS: tuple[SettingSpec, ...] = (
     ),
     # --- 表示 ----------------------------------------------------------
     SettingSpec(
-        "default_library_sort", "artist", "ライブラリの既定ソート", "enum",
+        "default_library_sort", "album", "ライブラリの既定ソート", "enum",
         "ライブラリ画面を開いたときの並び順。",
-        choices=("artist", "album", "genre", "year", "added"),
+        choices=("album", "artist", "genre", "year", "added"),
+    ),
+    SettingSpec(
+        "album_layout", "grid", "アルバム一覧の表示形式", "enum",
+        "「サムネイル」は画面幅に応じた複数列、「1 列」はアートワークを小さくして"
+        "アルバム名とアーティスト名を並べます（文字の一覧性が高い）。",
+        choices=("grid", "list"),
     ),
     SettingSpec(
         "theme", "dark", "テーマ", "enum", "画面の配色。", choices=("dark", "light"),

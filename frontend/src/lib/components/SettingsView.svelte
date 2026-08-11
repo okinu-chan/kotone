@@ -8,7 +8,14 @@
   const GROUPS = [
     {
       title: '再生',
-      keys: ['crossfade_enabled', 'crossfade_seconds', 'gapless_enabled', 'random_avoid_last'],
+      keys: [
+        'volume_control',
+        'startup_warmup_ms',
+        'crossfade_enabled',
+        'crossfade_seconds',
+        'gapless_enabled',
+        'random_avoid_last',
+      ],
     },
     {
       title: 'ラウドネス補正',
@@ -21,15 +28,20 @@
       note: 'ハードウェアミキサー（DAC 内蔵ボリューム）を使う場合、補正の精度は保証されません。',
     },
     {
-      title: 'ライブラリ',
+      title: 'ラウドネスの計測',
       keys: [
-        'artist_separators',
-        'ignore_leading_article',
         'rsgain_enabled',
-        'scan_on_start',
+        'use_replaygain_tags',
+        'loudness_true_peak',
+        'loudness_concurrency',
       ],
+      note: '計測済みの曲は再スキャンでも測り直しません。中断しても続きから再開できます。',
     },
-    { title: '表示', keys: ['default_library_sort', 'theme'] },
+    {
+      title: 'ライブラリ',
+      keys: ['artist_separators', 'ignore_leading_article', 'scan_on_start'],
+    },
+    { title: '表示', keys: ['default_library_sort', 'album_layout', 'theme'] },
   ];
 
   const ENUM_LABELS = {
@@ -42,6 +54,10 @@
     added: '追加日',
     dark: 'ダーク',
     light: 'ライト',
+    grid: 'サムネイル',
+    list: '1 列',
+    kotone: 'kotone（画面のスライダー）',
+    external: '外部（アンプ側で調整）',
   };
 
   let system = $state(null);

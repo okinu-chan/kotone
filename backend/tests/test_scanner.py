@@ -214,6 +214,68 @@ def test_repository_sorting_and_scope(scan: LibraryScanner, db: Database) -> Non
     assert [t["title"] for t in album_tracks] == ["Automatic", "First Love"]
 
 
+def test_album_artist_inferred_when_tag_missing(
+    library: Config, db: Database, settings: SettingsStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ALBUMARTIST タグが無くても、収録曲から補完される（実機の BOØWY で発覚）。"""
+    path = library.music_dir / "NoAlbumArtist/Album/01 Track.flac"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"\x00" * 128)
+
+    def fake_read_tags(p: Path) -> TrackTags | None:
+        if "NoAlbumArtist" not in p.parts:
+            return None  # 既存のデモ音源は対象外にする
+        tags = TrackTags(path=p, title="Track", album="タグ無しアルバム")
+        tags.artists = ["BOØWY"]        # ARTIST のみ。ALBUMARTIST は無い
+        tags.album_artists = []
+        tags.duration = 100.0
+        return tags
+
+    monkeypatch.setattr(scanner_module, "read_tags", fake_read_tags)
+    settings.set("rsgain_enabled", False)
+    LibraryScanner(db, library, settings).scan()
+
+    row = db.query_one(
+        "SELECT a.name AS artist FROM albums al "
+        "JOIN artists a ON a.id = al.album_artist_id WHERE al.name = ?",
+        ("タグ無しアルバム",),
+    )
+    assert row is not None
+    assert row["artist"] == "BOØWY"
+
+
+def test_multi_artist_album_marked_as_compilation(
+    library: Config, db: Database, settings: SettingsStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """収録曲のアーティストが複数なら、誰か 1 人を代表にせずコンピ扱いにする。"""
+    for index in (1, 2):
+        path = library.music_dir / f"Various/Album/{index:02d}.flac"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"\x00" * 128)
+
+    artists_by_name = {"01.flac": "歌手A", "02.flac": "歌手B"}
+
+    def fake_read_tags(p: Path) -> TrackTags | None:
+        if "Various" not in p.parts:
+            return None  # 既存のデモ音源は対象外にする
+        tags = TrackTags(path=p, title=p.stem, album="寄せ集め")
+        tags.artists = [artists_by_name[p.name]]
+        tags.album_artists = []
+        tags.duration = 100.0
+        return tags
+
+    monkeypatch.setattr(scanner_module, "read_tags", fake_read_tags)
+    settings.set("rsgain_enabled", False)
+    LibraryScanner(db, library, settings).scan()
+
+    row = db.query_one(
+        "SELECT album_artist_id, is_compilation FROM albums WHERE name = ?", ("寄せ集め",)
+    )
+    assert row is not None
+    assert row["album_artist_id"] is None
+    assert row["is_compilation"] == 1
+
+
 def test_initials_include_empty_buckets(scan: LibraryScanner, db: Database) -> None:
     scan.scan()
     repo = LibraryRepository(db)

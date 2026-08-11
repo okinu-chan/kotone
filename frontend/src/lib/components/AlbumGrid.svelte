@@ -12,7 +12,9 @@
       <AlbumArt {album} tier="small" alt="" />
       <span class="name clamp-2">{album.name}</span>
       <span class="artist truncate dim">
-        {album.album_artist ?? ''}{#if showYear && album.year}<span class="dot">·</span>{album.year}{/if}
+        {album.album_artist ?? (album.is_compilation ? '複数アーティスト' : '')}{#if showYear && album.year}<span
+            class="dot">·</span
+          >{album.year}{/if}
       </span>
     </button>
   {/each}

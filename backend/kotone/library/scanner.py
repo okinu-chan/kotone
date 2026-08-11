@@ -119,6 +119,7 @@ class LibraryScanner:
             self.db.commit()
 
             result.removed = self._remove_missing(seen_paths)
+            self._infer_album_artists()
             self._prune_orphans()
             self.db.commit()
 
@@ -434,6 +435,44 @@ class LibraryScanner:
             self.db.execute("DELETE FROM tracks WHERE id = ?", (row["id"],))
             removed += 1
         return removed
+
+    def _infer_album_artists(self) -> None:
+        """ALBUMARTIST タグが無いアルバムのアーティストを収録曲から補完する。
+
+        リッピング時に ARTIST しか書かれていない音源は珍しくない。そのままだと
+        アルバム一覧のアーティスト欄が空欄になり、アーティスト軸のソートも
+        効かないため、収録曲のアーティストから推定する。
+
+        * 収録曲のアーティストが 1 人だけ → そのアーティストをアルバムアーティストにする
+        * 複数いる → コンピレーション扱いにする（誰か 1 人を代表にはしない）
+        """
+        rows = self.db.query(
+            """
+            SELECT al.id                        AS album_id,
+                   COUNT(DISTINCT ta.artist_id) AS artist_count,
+                   MIN(ta.artist_id)            AS artist_id
+            FROM albums al
+            JOIN tracks t        ON t.album_id = al.id
+            JOIN track_artists ta ON ta.track_id = t.id AND ta.role = 'artist'
+            WHERE al.album_artist_id IS NULL
+            GROUP BY al.id
+            """
+        )
+        for row in rows:
+            if int(row["artist_count"]) == 1:
+                self.db.execute(
+                    "UPDATE albums SET album_artist_id = ? WHERE id = ?",
+                    (row["artist_id"], row["album_id"]),
+                )
+                self.db.execute(
+                    "INSERT OR IGNORE INTO album_artists (album_id, artist_id, position) "
+                    "VALUES (?, ?, 0)",
+                    (row["album_id"], row["artist_id"]),
+                )
+            else:
+                self.db.execute(
+                    "UPDATE albums SET is_compilation = 1 WHERE id = ?", (row["album_id"],)
+                )
 
     def _prune_orphans(self) -> None:
         """曲が 1 つも紐づかなくなったアルバム / アーティスト / ジャンルを削除する。"""

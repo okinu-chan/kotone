@@ -4,6 +4,7 @@
    * ソート軸の切り替え（要件 3.2）とイニシャルサーチ（要件 3.7）を提供する。
    */
   import AlbumGrid from './AlbumGrid.svelte';
+  import AlbumList from './AlbumList.svelte';
   import InitialSearch from './InitialSearch.svelte';
   import PageHeader from './PageHeader.svelte';
   import { api } from '../api.js';
@@ -33,6 +34,9 @@
   let loading = $state(false);
   let total = $state(0);
 
+  /** 'grid'（サムネイル）か 'list'（1 列） */
+  let layout = $state('grid');
+
   let sortInitialised = false;
   $effect(() => {
     if (sortInitialised || !settings.loaded) return;
@@ -40,7 +44,15 @@
     if (ALBUM_SORTS.includes(settings.values.default_library_sort)) {
       sort = settings.values.default_library_sort;
     }
+    if (['grid', 'list'].includes(settings.values.album_layout)) {
+      layout = settings.values.album_layout;
+    }
   });
+
+  function setLayout(next) {
+    layout = next;
+    settings.set('album_layout', next);
+  }
 
   $effect(() => {
     const currentView = view;
@@ -118,14 +130,33 @@
   </div>
 
   {#if view === 'albums'}
-    <label class="sort">
-      <span class="dim">並び順</span>
-      <select bind:value={sort}>
-        {#each ALBUM_SORTS as key (key)}
-          <option value={key}>{SORT_LABELS[key]}</option>
-        {/each}
-      </select>
-    </label>
+    <div class="right-tools">
+      <label class="sort">
+        <span class="dim">並び順</span>
+        <select bind:value={sort}>
+          {#each ALBUM_SORTS as key (key)}
+            <option value={key}>{SORT_LABELS[key]}</option>
+          {/each}
+        </select>
+      </label>
+
+      <div class="layout-toggle" role="group" aria-label="表示形式">
+        <button
+          class:active={layout === 'grid'}
+          aria-pressed={layout === 'grid'}
+          onclick={() => setLayout('grid')}
+          title="サムネイル表示"
+          aria-label="サムネイル表示">▦</button
+        >
+        <button
+          class:active={layout === 'list'}
+          aria-pressed={layout === 'list'}
+          onclick={() => setLayout('list')}
+          title="1 列表示"
+          aria-label="1 列表示">☰</button
+        >
+      </div>
+    </div>
   {/if}
 </div>
 
@@ -139,7 +170,11 @@
 {#if loading}
   <div class="loading"><div class="spinner"></div></div>
 {:else if view === 'albums'}
-  <AlbumGrid {albums} showYear={sort !== 'added'} />
+  {#if layout === 'list'}
+    <AlbumList {albums} showYear={sort !== 'added'} />
+  {:else}
+    <AlbumGrid {albums} showYear={sort !== 'added'} />
+  {/if}
 {:else if view === 'artists'}
   <ul class="rows">
     {#each artists as artist (artist.id)}
@@ -237,6 +272,35 @@
   .views button.active {
     background: var(--accent);
     border-color: var(--accent);
+    color: #0d0f13;
+  }
+
+  .right-tools {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .layout-toggle {
+    display: flex;
+    gap: 2px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+
+  .layout-toggle button {
+    display: grid;
+    place-items: center;
+    min-width: 40px;
+    min-height: 36px;
+    background: var(--surface);
+    color: var(--text-dim);
+    font-size: 15px;
+  }
+
+  .layout-toggle button.active {
+    background: var(--accent);
     color: #0d0f13;
   }
 

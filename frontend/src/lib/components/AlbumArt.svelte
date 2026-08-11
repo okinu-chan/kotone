@@ -11,7 +11,6 @@
     album,
     tier = 'small',
     alt = '',
-    rounded = true,
     eager = false,
     /** false にすると正方形の枠に収めず、画像本来の縦横比で表示する。 */
     square = true,
@@ -31,7 +30,6 @@
 
 <div
   class="art"
-  class:rounded
   class:natural={!square}
   style={square ? undefined : `--max-art-height: ${maxHeight}`}
 >
@@ -61,12 +59,10 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: var(--bg-sunken);
+    /* 角丸にはしない（原盤のジャケットを加工せずそのまま出す）。
+       余白（レターボックス）も塗らず、背景を透過させて見えなくする。 */
+    background: transparent;
     overflow: hidden;
-  }
-
-  .rounded {
-    border-radius: var(--radius);
   }
 
   img {
@@ -96,14 +92,19 @@
     max-height: var(--max-art-height, 52vh);
   }
 
+  /* アートワークが無いときだけ背景を敷く（画像がある場合は余白を透過させる） */
   .placeholder {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    background: var(--bg-sunken);
     color: var(--text-dim);
+  }
+
+  .placeholder svg {
     width: 40%;
     height: 40%;
   }
 
-  .placeholder svg {
-    width: 100%;
-    height: 100%;
-  }
 </style>
