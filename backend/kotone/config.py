@@ -70,12 +70,27 @@ class Config(BaseSettings):
     def resolved_static_dir(self) -> Path:
         """フロントエンドのビルド成果物の場所。
 
-        明示指定が無ければリポジトリ内の ``frontend/dist`` を探す
-        （開発時のリポジトリ直下でも、Pi 上の ``/opt/kotone`` でも同じ相対関係）。
+        優先順位:
+          1. 明示指定 (``KOTONE_STATIC_DIR`` / ``static_dir``)
+          2. ``__file__`` から見たリポジトリ相対（開発時にリポジトリ直下から起動する場合）
+          3. カレントディレクトリ基準（systemd の ``WorkingDirectory=/opt/kotone`` で
+             pip インストール済みパッケージから起動する本番運用の場合）
+
+        pip で site-packages にインストールすると ``__file__`` 相対では
+        ``frontend/dist`` を辿れないため、実在する候補を順に探す
+        （install.sh は 1 の env も書き込むが、保険としてここでも解決する）。
         """
         if self.static_dir is not None:
             return self.static_dir
-        return Path(__file__).resolve().parents[2] / "frontend" / "dist"
+
+        candidates = [
+            Path(__file__).resolve().parents[2] / "frontend" / "dist",
+            Path.cwd() / "frontend" / "dist",
+        ]
+        for candidate in candidates:
+            if candidate.is_dir():
+                return candidate
+        return candidates[0]
 
     def ensure_dirs(self) -> None:
         for path in (self.data_dir, self.artwork_cache_dir, self.backup_dir):

@@ -187,6 +187,8 @@ KOTONE_DATA_DIR=${DATA_DIR}
 KOTONE_MPD_HOST=localhost
 KOTONE_MPD_PORT=6600
 KOTONE_LOG_LEVEL=INFO
+# pip インストール済みパッケージからはリポジトリ相対で frontend/dist を辿れないため明示する
+KOTONE_STATIC_DIR=${PREFIX}/frontend/dist
 EOF
   chmod 644 "${CONFIG_DIR}/kotone.env"
 else
