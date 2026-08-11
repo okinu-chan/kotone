@@ -67,6 +67,18 @@ class TrackTags:
     album_sort: str = ""
     title_sort: str = ""
 
+    # --- 既存のラウドネス情報（あれば計測を省略できる。要件 3.1）---------
+    # ファイルに ReplayGain / R128 タグが入っている場合はそれを読む。
+    # 計測は 1 曲あたり数秒かかるため、大規模ライブラリでは効果が大きい。
+    track_gain_db: float | None = None
+    track_peak: float | None = None
+    album_gain_db: float | None = None
+    album_peak: float | None = None
+
+    @property
+    def has_gain(self) -> bool:
+        return self.track_gain_db is not None
+
     @property
     def display_title(self) -> str:
         return self.title or self.path.stem
@@ -96,7 +108,18 @@ _VORBIS_MAP = {
     "albumsort": "album_sort",
     "titlesort": "title_sort",
     "albumartistsort": "_albumartistsort",
+    # ReplayGain 2.0（-18 LUFS 基準）
+    "replaygain_track_gain": "track_gain_db",
+    "replaygain_track_peak": "track_peak",
+    "replaygain_album_gain": "album_gain_db",
+    "replaygain_album_peak": "album_peak",
+    # EBU R128（-23 LUFS 基準・Q7.8 固定小数）。Opus/Vorbis で使われる
+    "r128_track_gain": "_r128_track_gain",
+    "r128_album_gain": "_r128_album_gain",
 }
+
+#: R128 タグ（-23 LUFS 基準）を ReplayGain 2.0（-18 LUFS 基準）へ揃える補正値
+_R128_TO_RG2_DB = 5.0
 
 # ID3v2 フレーム
 _ID3_MAP = {
@@ -186,6 +209,34 @@ def _assign(tags: TrackTags, target: str, values: list[str]) -> None:
     elif target == "_albumartistsort":
         if not tags.artist_sort:
             tags.artist_sort = list(values)
+    elif target in ("track_gain_db", "album_gain_db"):
+        # "-6.77 dB" のような表記
+        gain = _parse_float(values[0], strip=("db",))
+        if gain is not None and getattr(tags, target) is None:
+            setattr(tags, target, gain)
+    elif target in ("track_peak", "album_peak"):
+        peak = _parse_float(values[0])
+        if peak is not None and peak > 0 and getattr(tags, target) is None:
+            setattr(tags, target, peak)
+    elif target in ("_r128_track_gain", "_r128_album_gain"):
+        # Q7.8 固定小数（-23 LUFS 基準）→ dB（-18 LUFS 基準）へ換算
+        raw = _parse_float(values[0])
+        if raw is None:
+            return
+        gain = raw / 256.0 + _R128_TO_RG2_DB
+        field_name = "track_gain_db" if target == "_r128_track_gain" else "album_gain_db"
+        if getattr(tags, field_name) is None:
+            setattr(tags, field_name, gain)
+
+
+def _parse_float(value: str, strip: tuple[str, ...] = ()) -> float | None:
+    text = str(value).strip().lower()
+    for token in strip:
+        text = text.replace(token, "")
+    try:
+        return float(text.strip())
+    except ValueError:
+        return None
 
 
 def _read_vorbis_like(audio: Any, tags: TrackTags) -> None:

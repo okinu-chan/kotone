@@ -187,7 +187,7 @@ class PlaybackController:
                         (t["path"] for t in tracks if t["id"] == start_track_id), None
                     )
                 await self._fill_random_queue(first=start_path)
-                await self.mpd.play(0)
+                await self._start_with_warmup(0)
             else:
                 await self.mpd.add_many(t["path"] for t in tracks)
                 index = 0
@@ -196,7 +196,7 @@ class PlaybackController:
                         (i for i, t in enumerate(tracks) if t["id"] == start_track_id), 0
                     )
                 await self._apply_mode_flags()
-                await self.mpd.play(index)
+                await self._start_with_warmup(index)
 
             self._persist_state()
 
@@ -216,7 +216,7 @@ class PlaybackController:
             await self.mpd.clear()
             await self.mpd.add_many(paths)
             await self._apply_mode_flags()
-            await self.mpd.play(min(start_index, len(paths) - 1))
+            await self._start_with_warmup(min(start_index, len(paths) - 1))
             self._persist_state()
         await self.broadcast_state()
 
@@ -397,7 +397,57 @@ class PlaybackController:
         if len(self._random.recent) > limit:
             del self._random.recent[:-limit]
 
+    # ==================================================== 再生開始の欠落対策
+
+    async def _start_with_warmup(self, position: int) -> None:
+        """曲頭が欠けないように再生を開始する（要件 3.1）。
+
+        MPD が停止状態から再生を始めると ALSA デバイスを開き直すため、
+        USB DAC がサンプリングレートを補足し終えるまでの数百 ms は音が出ない。
+        プリギャップの短い曲では、この間に曲の先頭が失われてしまう。
+
+        そこで「無音のまま先行再生してデバイスと DAC を起こし、
+        ロックが済んでから曲頭へ戻す」ことで、先頭を必ず鳴らす。
+        既にデバイスが開いている（再生中／一時停止中）場合は不要なので行わない。
+        """
+        warmup_ms = int(self.settings.get("startup_warmup_ms") or 0)
+        if warmup_ms <= 0:
+            await self.mpd.play(position)
+            return
+
+        status = await self.mpd.status()
+        if status.get("state") == "play":
+            # デバイスは既に開いている。曲間は MPD の gapless に任せる
+            await self.mpd.play(position)
+            return
+
+        previous_volume = _int_or_none(status.get("volume"))
+        try:
+            await self.mpd.set_volume(0)          # ウォームアップ中は無音にする
+            self._expected_volume = 0
+            await self.mpd.play(position)
+            await asyncio.sleep(warmup_ms / 1000)
+            await self.mpd.seek(0)                # デバイスが開いた状態で曲頭へ戻す
+        finally:
+            # 音量はこの後 _apply_loudness が曲に応じて設定し直す
+            if previous_volume is not None:
+                await self.mpd.set_volume(previous_volume)
+                self._expected_volume = previous_volume
+
     # ============================================================ 音量
+
+    @property
+    def external_volume(self) -> bool:
+        """音量をアンプ側で操作する構成か（UI のスライダーを出さない）。"""
+        return self.settings.get("volume_control") == "external"
+
+    def _base_volume(self) -> int:
+        """ラウドネス補正をかける前の基準音量。
+
+        外部アンプで音量を取る構成では MPD 側を最大に保ち、補正による
+        減衰だけを効かせる（デジタル減衰を最小限にするため）。
+        """
+        return 100 if self.external_volume else self.user_volume
 
     async def set_volume(self, volume: int) -> None:
         self.user_volume = max(0, min(100, int(volume)))
@@ -413,6 +463,8 @@ class PlaybackController:
         すると 20÷1.58≈13 になる）してしまうため、割り戻さずに観測値をそのまま
         採用する。ラウドネス補正は次のトラック切り替え時に改めて適用される。
         """
+        if self.external_volume:
+            return  # 音量はアンプ側で取る構成なので追随しない
         status = await self.mpd.status()
         try:
             observed = int(status.get("volume", -1))
@@ -429,7 +481,7 @@ class PlaybackController:
     async def _apply_loudness(self, status: dict[str, Any]) -> None:
         """現在の曲に合わせて実効音量を設定する。"""
         factor = await self._current_factor()
-        effective = max(0, min(100, round(self.user_volume * factor)))
+        effective = max(0, min(100, round(self._base_volume() * factor)))
         try:
             current = int(status.get("volume", -1))
         except (TypeError, ValueError):
@@ -481,6 +533,7 @@ class PlaybackController:
                 "repeat": self.repeat_mode,
                 "order": self.order_mode,
                 "volume": self.user_volume,
+                "volume_control": self.settings.get("volume_control"),
                 "state": "stop",
             }
         status = await self.mpd.status()
@@ -495,6 +548,7 @@ class PlaybackController:
             "elapsed": float(status.get("elapsed") or 0),
             "duration": float(status.get("duration") or (track or {}).get("duration") or 0),
             "volume": self.user_volume,
+            "volume_control": self.settings.get("volume_control"),
             "effective_volume": _int_or_none(status.get("volume")),
             "repeat": self.repeat_mode,
             "order": self.order_mode,

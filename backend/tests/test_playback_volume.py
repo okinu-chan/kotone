@@ -15,22 +15,32 @@ from kotone.settings import SettingsStore
 
 
 class FakeMPD:
-    def __init__(self) -> None:
+    def __init__(self, state: str = "play") -> None:
         self.volume = 0
         self.song = {"file": "a.flac"}
         self.connected = True
+        self.state = state
+        self.calls: list[tuple] = []
 
     def on_event(self, cb) -> None:  # noqa: ANN001
         pass
 
     async def status(self) -> dict:
-        return {"volume": self.volume, "state": "play"}
+        return {"volume": self.volume, "state": self.state}
 
     async def current_song(self) -> dict:
         return dict(self.song)
 
     async def set_volume(self, v: int) -> None:
         self.volume = max(0, min(100, int(v)))
+        self.calls.append(("setvol", self.volume))
+
+    async def play(self, position: int | None = None) -> None:
+        self.state = "play"
+        self.calls.append(("play", position))
+
+    async def seek(self, seconds: float) -> None:
+        self.calls.append(("seek", seconds))
 
 
 class FakeRepo:
@@ -119,3 +129,79 @@ async def test_loudness_disabled_is_passthrough(controller) -> None:
     ctrl.user_volume = 42
     await ctrl._apply_loudness(await mpd.status())
     assert mpd.volume == 42  # 補正なし
+
+
+# ------------------------------------------------ 外部アンプで音量を取る構成
+
+
+async def test_external_mode_keeps_mpd_at_full_scale(controller) -> None:
+    """アンプ側で音量を取る場合、MPD は最大のままにする（デジタル減衰を避ける）。"""
+    ctrl, mpd = controller
+    ctrl.settings.set("volume_control", "external")
+    ctrl.settings.set("loudness_enabled", False)
+    ctrl.user_volume = 30  # UI 側の値は無視される
+    await ctrl._apply_loudness(await mpd.status())
+    assert mpd.volume == 100
+
+
+async def test_external_mode_still_attenuates_for_loudness(controller) -> None:
+    """外部音量でもラウドネス補正の減衰は効く（正方向はクランプされる）。"""
+    ctrl, mpd = controller
+    ctrl.settings.set("volume_control", "external")
+    ctrl.repo.tracks["a.flac"]["track_gain_db"] = -6.0
+    ctrl.repo.tracks["a.flac"]["track_peak"] = 1.0
+    await ctrl._apply_loudness(await mpd.status())
+    # 100 * 10^(-6/20) = 50.1 -> 50
+    assert mpd.volume == 50
+
+
+# ------------------------------------------- 再生開始時の欠落対策（ウォームアップ）
+
+
+async def test_warmup_mutes_then_seeks_back_to_start(db, settings) -> None:
+    """停止状態からの再生では、無音で DAC を起こしてから曲頭へ戻す（要件 3.1）。"""
+    mpd = FakeMPD(state="stop")
+    mpd.volume = 40
+    ctrl = PlaybackController(mpd, db, FakeRepo({}), settings, EventBus())
+    settings.set("startup_warmup_ms", 50)
+
+    await ctrl._start_with_warmup(3)
+
+    kinds = [c[0] for c in mpd.calls]
+    assert kinds == ["setvol", "play", "seek", "setvol"]
+    assert mpd.calls[0][1] == 0        # まず無音にする
+    assert mpd.calls[1][1] == 3        # 指定位置から再生
+    assert mpd.calls[2][1] == 0        # 曲頭へ戻す
+    assert mpd.calls[3][1] == 40       # 元の音量へ戻す
+
+
+async def test_warmup_skipped_when_already_playing(db, settings) -> None:
+    """再生中はデバイスが開いているのでウォームアップ不要（曲間は gapless に任せる）。"""
+    mpd = FakeMPD(state="play")
+    ctrl = PlaybackController(mpd, db, FakeRepo({}), settings, EventBus())
+    settings.set("startup_warmup_ms", 500)
+
+    await ctrl._start_with_warmup(2)
+
+    assert [c[0] for c in mpd.calls] == ["play"]
+
+
+async def test_warmup_disabled_by_setting(db, settings) -> None:
+    mpd = FakeMPD(state="stop")
+    ctrl = PlaybackController(mpd, db, FakeRepo({}), settings, EventBus())
+    settings.set("startup_warmup_ms", 0)
+
+    await ctrl._start_with_warmup(1)
+
+    assert [c[0] for c in mpd.calls] == ["play"]
+
+
+async def test_external_mode_ignores_external_volume_events(controller) -> None:
+    """アンプ側で取る構成では、MPD の音量変化に追随しない。"""
+    ctrl, mpd = controller
+    ctrl.settings.set("volume_control", "external")
+    ctrl.user_volume = 55
+    ctrl._expected_volume = 100
+    mpd.volume = 20
+    await ctrl._reconcile_external_volume()
+    assert ctrl.user_volume == 55  # 変化しない

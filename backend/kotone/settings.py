@@ -48,6 +48,21 @@ SETTING_SPECS: tuple[SettingSpec, ...] = (
         "0 にすると完全に独立した抽選になります。",
         minimum=0, maximum=20,
     ),
+    SettingSpec(
+        "startup_warmup_ms", 600, "再生開始時のウォームアップ (ms)", "int",
+        "USB DAC がサンプリングレートを補足するまでの間に曲の先頭が欠けるのを防ぎます。"
+        "無音で先行再生してから曲頭に戻すため、この時間だけ再生開始が遅くなります。"
+        "0 で無効。曲頭が切れる場合は増やしてください（要件 3.1）。",
+        minimum=0, maximum=3000,
+    ),
+    # --- 音量 -----------------------------------------------------------
+    SettingSpec(
+        "volume_control", "kotone", "音量の操作方法", "enum",
+        "「kotone」は画面の音量スライダーで操作します。"
+        "「外部（アンプ側で調整）」はスライダーを隠し、MPD の音量を最大に保ちます。"
+        "ヘッドホンアンプやプリアンプのつまみで音量を調整する構成向けです。",
+        choices=("kotone", "external"),
+    ),
     # --- ラウドネス補正 ------------------------------------------------
     SettingSpec(
         "loudness_enabled", True, "ラウドネス補正", "bool",
@@ -79,7 +94,19 @@ SETTING_SPECS: tuple[SettingSpec, ...] = (
     ),
     SettingSpec(
         "rsgain_enabled", True, "スキャン時にラウドネスを計測する", "bool",
-        "rsgain が未インストールの場合は自動的にスキップされます。",
+        "rsgain が無い場合は FFmpeg (ebur128) で計測します。"
+        "計測済みの曲は再スキャンでも測り直しません。",
+    ),
+    SettingSpec(
+        "use_replaygain_tags", True, "ファイルの ReplayGain タグを使う", "bool",
+        "音源に ReplayGain / R128 タグが入っていれば、計測せずにその値を使います。"
+        "大規模ライブラリでは計測時間を大幅に短縮できます。",
+    ),
+    SettingSpec(
+        "loudness_concurrency", 0, "ラウドネス計測の並列数", "int",
+        "同時に走らせる計測プロセス数。0 で CPU コア数（Raspberry Pi 4 なら 4）。"
+        "大きくすると速くなりますが、その間 Pi の負荷が上がります。",
+        minimum=0, maximum=16,
     ),
     SettingSpec(
         "scan_on_start", False, "起動時にライブラリを再スキャンする", "bool",

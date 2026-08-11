@@ -94,7 +94,7 @@
     role="img"
     aria-label={track ? `${track.title} のアルバムアート` : 'アルバムアート'}
   >
-    <AlbumArt {album} tier="large" alt="" rounded={false} eager />
+    <AlbumArt {album} tier="large" alt="" rounded={false} square={false} eager />
   </div>
 
   <div class="meta">
@@ -207,18 +207,21 @@
     <span class="sep">·</span>{player.state.scope?.label ?? ''}
   </p>
 
-  <div class="volume">
-    <span aria-hidden="true">🔈</span>
-    <input
-      type="range"
-      min="0"
-      max="100"
-      value={player.state.volume ?? 60}
-      onchange={onVolume}
-      aria-label="音量"
-    />
-    <span class="tabular dim vol-value">{player.state.volume ?? 0}</span>
-  </div>
+  <!-- 音量をアンプ側で取る構成ではスライダーを出さない（設定「音量の操作方法」） -->
+  {#if player.state.volume_control !== 'external'}
+    <div class="volume">
+      <span aria-hidden="true">🔈</span>
+      <input
+        type="range"
+        min="0"
+        max="100"
+        value={player.state.volume ?? 60}
+        onchange={onVolume}
+        aria-label="音量"
+      />
+      <span class="tabular dim vol-value">{player.state.volume ?? 0}</span>
+    </div>
+  {/if}
 
   {#if track?.album_id}
     <button class="album-link" onclick={playAlbumFromHere}>
@@ -249,16 +252,19 @@
     margin: 0;
   }
 
+  /* 縦横比は画像に合わせる（正方形に切り取らない。要件 3.3）。
+     縦長ジャケットでも操作部が画面外へ押し出されないよう高さだけ制限する。 */
   .art-wrap {
     width: 100%;
-    aspect-ratio: 1 / 1;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: var(--bg-sunken);
+    touch-action: pan-y;
+  }
+
+  .art-wrap :global(.art) {
     border-radius: var(--radius-lg);
     overflow: hidden;
-    touch-action: pan-y;
     box-shadow: 0 12px 40px rgb(0 0 0 / 0.35);
   }
 

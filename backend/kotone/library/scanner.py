@@ -77,6 +77,7 @@ class LibraryScanner:
         self._reader = get_reading_generator()
         self._ignore_article = bool(settings.get("ignore_leading_article"))
         self._separators = list(settings.get("artist_separators") or [])
+        self._use_tag_gain = bool(settings.get("use_replaygain_tags"))
         # 名前 -> id のキャッシュ（1 回のスキャン中だけ有効）
         self._artist_ids: dict[str, int] = {}
         self._genre_ids: dict[str, int] = {}
@@ -232,6 +233,21 @@ class LibraryScanner:
             "year": tags.year,
             "release_date": tags.date,
         }
+
+        # ファイルに ReplayGain / R128 タグがあれば計測せずに採用する（要件 3.1）。
+        # 1 曲あたり数秒かかる計測を丸ごと省けるため、大規模ライブラリで効く。
+        if tags.has_gain and self._use_tag_gain:
+            values.update(
+                track_gain_db=tags.track_gain_db,
+                track_peak=tags.track_peak,
+                album_gain_db=(
+                    tags.album_gain_db if tags.album_gain_db is not None else tags.track_gain_db
+                ),
+                album_peak=(
+                    tags.album_peak if tags.album_peak is not None else tags.track_peak
+                ),
+                gain_scanned_at=_now_text(),
+            )
 
         if existing is None:
             values.update(reading=reading, sort_key=sort_key, initial=initial,
@@ -523,8 +539,20 @@ class LibraryScanner:
 
     # ============================================================ ラウドネス
 
-    def _scan_loudness(self, dirty_albums: set[int], result: ScanResult, *, full: bool) -> None:
-        scanner = LoudnessScanner(enabled=bool(self.settings.get("rsgain_enabled")))
+    def _scan_loudness(
+        self, dirty_albums: set[int], result: ScanResult, *, full: bool, remeasure: bool = False
+    ) -> None:
+        """未計測の曲だけラウドネスを計測する。
+
+        計測は 1 曲あたり数秒かかるため、``full`` 再スキャンでも既に値を持つ曲は
+        測り直さない（18,000 曲規模で全曲再計測すると数時間かかるため）。
+        本当に測り直したい場合だけ ``remeasure=True`` を指定する。
+        """
+        del dirty_albums  # 計測済みかどうかだけで判断する
+        scanner = LoudnessScanner(
+            enabled=bool(self.settings.get("rsgain_enabled")),
+            concurrency=int(self.settings.get("loudness_concurrency") or 0),
+        )
         if not scanner.available:
             if self.settings.get("rsgain_enabled"):
                 log.warning(
@@ -532,30 +560,35 @@ class LibraryScanner:
                 )
             return
 
-        if full:
+        if remeasure:
             rows = self.db.query(
                 "SELECT id, path, album_id FROM tracks WHERE album_id IS NOT NULL"
             )
         else:
             rows = self.db.query(
                 "SELECT id, path, album_id FROM tracks "
-                "WHERE album_id IS NOT NULL AND (gain_scanned_at IS NULL OR album_id IN "
-                "(SELECT value FROM json_each(?)))",
-                (_json_array(dirty_albums),),
+                "WHERE album_id IS NOT NULL AND gain_scanned_at IS NULL"
             )
         if not rows:
+            log.info("ラウドネス計測: 未計測の曲はありません")
             return
 
         by_album: dict[int, list[dict[str, Any]]] = defaultdict(list)
         for row in rows:
             by_album[int(row["album_id"])].append(row)
 
-        total = len(by_album)
+        # 進捗はアルバム数ではなく曲数で出す（大規模ライブラリで残量が読めるように）
+        total = len(rows)
+        done = 0
+        started = time.monotonic()
         self._set_state(phase=f"ラウドネスを計測中 ({scanner.backend})",
                         processed=0, total=total)
-        log.info("ラウドネス計測: %d アルバム (backend=%s)", total, scanner.backend)
+        log.info(
+            "ラウドネス計測: %d 曲 / %d アルバム (backend=%s)",
+            total, len(by_album), scanner.backend,
+        )
 
-        for index, tracks in enumerate(by_album.values(), start=1):
+        for tracks in by_album.values():
             paths = [self.config.music_dir / t["path"] for t in tracks]
             measured = scanner.scan_album(paths)
             album_gain = measured.album
@@ -581,9 +614,18 @@ class LibraryScanner:
                 )
                 result.tracks_measured += 1
 
+            done += len(tracks)
             self.db.commit()
-            self._progress("ラウドネスを計測中", index, total)
-            self._set_state(processed=index)
+            self._progress(_loudness_phase_label(started, done, total), done, total)
+            self._set_state(processed=done)
+
+        elapsed = time.monotonic() - started
+        if result.tracks_measured:
+            log.info(
+                "ラウドネス計測 完了: %d 曲 / %.0f 秒 (%.1f 曲/分)",
+                result.tracks_measured, elapsed,
+                result.tracks_measured / max(elapsed / 60, 0.001),
+            )
 
     # ============================================================ 進捗の保存
 
@@ -627,3 +669,25 @@ def _json_array(values: set[int]) -> str:
     import json  # noqa: PLC0415
 
     return json.dumps(sorted(values))
+
+
+def _now_text() -> str:
+    """SQLite の ``datetime('now')`` と同じ書式の現在時刻（UTC）。"""
+    from datetime import UTC, datetime  # noqa: PLC0415
+
+    return datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _loudness_phase_label(started: float, done: int, total: int) -> str:
+    """残り時間の目安を含む進捗ラベル。"""
+    elapsed = time.monotonic() - started
+    if done <= 0 or elapsed <= 0:
+        return "ラウドネスを計測中"
+    remaining = (total - done) * (elapsed / done)
+    if remaining >= 3600:
+        eta = f"残り約 {remaining / 3600:.1f} 時間"
+    elif remaining >= 60:
+        eta = f"残り約 {remaining / 60:.0f} 分"
+    else:
+        eta = f"残り約 {remaining:.0f} 秒"
+    return f"ラウドネスを計測中（{eta}）"
