@@ -61,9 +61,27 @@ class AlbumLoudness:
     album: LoudnessResult | None = None
 
 
+#: 並列数の既定上限。
+#:
+#: Raspberry Pi 4B での実測（3分の FLAC、ebur128 peak=sample）:
+#:
+#: ===== ============== ==================
+#: 並列   合計スループット  18,000 曲の所要
+#: ===== ============== ==================
+#: 1       30.9x          34.5 時間
+#: **2**   **49.9x**      **21.4 時間**
+#: 3       51.7x          20.6 時間
+#: 4       51.3x          20.8 時間
+#: ===== ============== ==================
+#:
+#: コア数を増やしてもメモリ帯域で頭打ちになるため、3 を超えて並列化しても
+#: 速くならない。むしろ再生や UI に回すコアを残したほうがよい。
+MAX_AUTO_CONCURRENCY = 3
+
+
 def default_concurrency() -> int:
-    """既定の並列数（CPU コア数。取得できなければ 2）。"""
-    return max(1, os.cpu_count() or 2)
+    """既定の並列数（CPU コア数と :data:`MAX_AUTO_CONCURRENCY` の小さい方）。"""
+    return max(1, min(os.cpu_count() or 2, MAX_AUTO_CONCURRENCY))
 
 
 class LoudnessScanner:
@@ -75,10 +93,15 @@ class LoudnessScanner:
         enabled: bool = True,
         timeout: float = 900.0,
         concurrency: int | None = None,
+        true_peak: bool = False,
     ) -> None:
         self.enabled = enabled
         self.timeout = timeout
         self.concurrency = concurrency if concurrency and concurrency > 0 else default_concurrency()
+        # トゥルーピークは 4 倍オーバーサンプリングを伴うため約 1.5 倍遅い
+        # （Pi 4B 実測: peak=true 21.7x / peak=sample 31.0x）。
+        # ピークはクリッピング防止にしか使わないので既定はサンプルピーク。
+        self.true_peak = true_peak
         self._rsgain = shutil.which("rsgain")
         self._ffmpeg = shutil.which("ffmpeg")
 
@@ -153,9 +176,11 @@ class LoudnessScanner:
         return AlbumLoudness(tracks=tracks, album=compute_album_gain(tracks))
 
     def _measure_with_ffmpeg(self, path: Path) -> LoudnessResult | None:
+        peak_mode = "true" if self.true_peak else "sample"
         cmd = [
             self._ffmpeg, "-v", "info", "-nostats", "-i", str(path),
-            "-map", "a:0", "-af", "ebur128=peak=true:framelog=quiet", "-f", "null", "-",
+            "-map", "a:0", "-af", f"ebur128=peak={peak_mode}:framelog=quiet",
+            "-f", "null", "-",
         ]
         try:
             proc = subprocess.run(  # noqa: S603

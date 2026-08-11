@@ -104,9 +104,14 @@ SETTING_SPECS: tuple[SettingSpec, ...] = (
     ),
     SettingSpec(
         "loudness_concurrency", 0, "ラウドネス計測の並列数", "int",
-        "同時に走らせる計測プロセス数。0 で CPU コア数（Raspberry Pi 4 なら 4）。"
-        "大きくすると速くなりますが、その間 Pi の負荷が上がります。",
+        "同時に走らせる計測プロセス数。0 で自動（CPU コア数と 3 の小さい方）。"
+        "Raspberry Pi 4 ではメモリ帯域が上限になるため、2 を超えても速くなりません。",
         minimum=0, maximum=16,
+    ),
+    SettingSpec(
+        "loudness_true_peak", False, "トゥルーピークで計測する", "bool",
+        "クリッピング防止の精度が上がりますが、4 倍オーバーサンプリングを伴うため"
+        "計測が約 1.5 倍遅くなります。通常はサンプルピーク（オフ）で十分です。",
     ),
     SettingSpec(
         "scan_on_start", False, "起動時にライブラリを再スキャンする", "bool",

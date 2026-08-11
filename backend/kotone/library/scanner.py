@@ -552,6 +552,7 @@ class LibraryScanner:
         scanner = LoudnessScanner(
             enabled=bool(self.settings.get("rsgain_enabled")),
             concurrency=int(self.settings.get("loudness_concurrency") or 0),
+            true_peak=bool(self.settings.get("loudness_true_peak")),
         )
         if not scanner.available:
             if self.settings.get("rsgain_enabled"):
