@@ -250,13 +250,20 @@
     border-color: var(--accent-dim);
   }
 
+  /* 下までスクロールしても絞り込み・並び順を操作できるよう固定する。
+     PageHeader（sticky, 高さ約 60px）の直下に貼り付ける。 */
   .toolbar {
+    position: sticky;
+    top: calc(var(--tap) + var(--safe-top) + 16px);
+    z-index: 19;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
     flex-wrap: wrap;
     padding: 10px 12px;
+    background: color-mix(in srgb, var(--bg) 94%, transparent);
+    backdrop-filter: blur(12px);
     border-bottom: 1px solid var(--border);
   }
 
@@ -331,13 +338,17 @@
     font-size: 13px;
   }
 
+  /* 適用中の絞り込みもツールバーと一緒に固定表示する */
   .filter-chip {
+    position: sticky;
+    top: calc(var(--tap) + var(--safe-top) + 74px);
+    z-index: 18;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
     padding: 8px 14px;
-    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    background: color-mix(in srgb, var(--accent) 16%, var(--bg));
     font-size: 13px;
   }
 

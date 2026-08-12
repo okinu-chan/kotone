@@ -100,12 +100,14 @@ class LibraryRepository:
         genre_id: int | None = None,
         year: int | None = None,
         query: str | None = None,
+        codec: str | None = None,
+        quality: str | None = None,
         limit: int | None = None,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         where, params = _album_filters(
             initial=initial, initial_group=initial_group, artist_id=artist_id,
-            genre_id=genre_id, year=year, query=query,
+            genre_id=genre_id, year=year, query=query, codec=codec, quality=quality,
         )
         order = ALBUM_SORTS.get(sort, ALBUM_SORTS["artist"])
         sql = f"{_ALBUM_SELECT} {where} ORDER BY {order}"
@@ -190,7 +192,8 @@ class LibraryRepository:
         )
         if artist is None:
             return None
-        artist["albums"] = self.list_albums(sort="year", artist_id=artist_id)
+        # アルバム名順に並べる（リリース年順だと目当てのアルバムを探しにくい）
+        artist["albums"] = self.list_albums(sort="album", artist_id=artist_id)
         artist["tracks"] = self.list_tracks(artist_id=artist_id, sort="album")
         return artist
 
@@ -207,12 +210,15 @@ class LibraryRepository:
         initial: str | None = None,
         initial_group: str | None = None,
         query: str | None = None,
+        codec: str | None = None,
+        quality: str | None = None,
         limit: int | None = None,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         where, params = _track_filters(
             album_id=album_id, artist_id=artist_id, genre_id=genre_id, year=year,
             initial=initial, initial_group=initial_group, query=query,
+            codec=codec, quality=quality,
         )
         order = TRACK_SORTS.get(sort, TRACK_SORTS["album"])
         sql = f"{_TRACK_SELECT} {where} ORDER BY {order}"
@@ -239,6 +245,32 @@ class LibraryRepository:
             ORDER BY g.sort_key, g.reading, g.name
             """
         )
+
+    def list_formats(self) -> dict[str, Any]:
+        """ライブラリに実在するフォーマットと音質の一覧（絞り込みの選択肢用）。
+
+        選択肢を固定で並べると、そのライブラリに無いものまで出てしまう。
+        実際に入っているものだけを件数つきで返す。
+        """
+        codecs = self.db.query(
+            """
+            SELECT codec, COUNT(*) AS track_count,
+                   COUNT(DISTINCT album_id) AS album_count
+            FROM tracks WHERE codec != '' AND missing = 0
+            GROUP BY codec ORDER BY track_count DESC
+            """
+        )
+        qualities = []
+        for key, condition in QUALITY_FILTERS.items():
+            count = int(
+                self.db.scalar(
+                    f"SELECT COUNT(*) FROM tracks t WHERE t.missing = 0 AND {condition}"
+                )
+                or 0
+            )
+            if count:
+                qualities.append({"key": key, "track_count": count})
+        return {"codecs": codecs, "qualities": qualities}
 
     def list_years(self) -> list[dict[str, Any]]:
         return self.db.query(
@@ -419,6 +451,8 @@ def _album_filters(
     genre_id: int | None = None,
     year: int | None = None,
     query: str | None = None,
+    codec: str | None = None,
+    quality: str | None = None,
 ) -> tuple[str, list[Any]]:
     clauses: list[str] = []
     params: list[Any] = []
@@ -452,7 +486,32 @@ def _album_filters(
         )
         like = f"%{query}%"
         params.extend([like, like, like, like])
+    if codec:
+        clauses.append(
+            "EXISTS (SELECT 1 FROM tracks t WHERE t.album_id = al.id AND t.codec = ?)"
+        )
+        params.append(codec)
+    if quality:
+        condition = _quality_condition(quality)
+        if condition:
+            clauses.append(
+                f"EXISTS (SELECT 1 FROM tracks t WHERE t.album_id = al.id AND {condition})"
+            )
     return (f"WHERE {' AND '.join(clauses)}" if clauses else ""), params
+
+
+#: 音質による絞り込み（要件 4.1 の対応フォーマットに対応する分類）
+QUALITY_FILTERS: dict[str, str] = {
+    # ハイレゾ = 48kHz 超、または 16bit 超
+    "hires": "(t.samplerate > 48000 OR t.bit_depth > 16)",
+    "cd": "(t.samplerate <= 48000 AND (t.bit_depth IS NULL OR t.bit_depth <= 16) "
+          "AND t.is_dsd = 0)",
+    "dsd": "t.is_dsd = 1",
+}
+
+
+def _quality_condition(quality: str) -> str | None:
+    return QUALITY_FILTERS.get(quality)
 
 
 def _track_filters(
@@ -464,6 +523,8 @@ def _track_filters(
     initial: str | None = None,
     initial_group: str | None = None,
     query: str | None = None,
+    codec: str | None = None,
+    quality: str | None = None,
 ) -> tuple[str, list[Any]]:
     clauses: list[str] = ["t.missing = 0"]
     params: list[Any] = []
@@ -497,6 +558,13 @@ def _track_filters(
             "(t.title LIKE ? OR t.reading LIKE ? OR t.sort_key LIKE ? OR al.name LIKE ?)"
         )
         params.extend([like, like, like, like])
+    if codec:
+        clauses.append("t.codec = ?")
+        params.append(codec)
+    if quality:
+        condition = _quality_condition(quality)
+        if condition:
+            clauses.append(condition)
     return f"WHERE {' AND '.join(clauses)}", params
 
 

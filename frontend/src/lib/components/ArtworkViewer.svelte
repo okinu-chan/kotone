@@ -46,15 +46,16 @@
   <div class="viewer" role="dialog" aria-modal="true" aria-label="アートワークの拡大表示">
     <button class="scrim" onclick={() => (open = false)} aria-label="閉じる"></button>
 
-    <img src={url} {alt} style={sizeStyle} onload={onLoad} decoding="async" />
+    <!-- 拡大した画像をもう一度タップすると閉じる -->
+    <button class="image-button" onclick={() => (open = false)} aria-label="閉じる">
+      <img src={url} {alt} style={sizeStyle} onload={onLoad} decoding="async" />
+    </button>
 
     {#if loaded}
       <p class="info tabular">
-        {natural.width} × {natural.height}
+        {natural.width} × {natural.height}<span class="sep">·</span>タップで閉じる
       </p>
     {/if}
-
-    <button class="close" onclick={() => (open = false)} aria-label="閉じる">✕</button>
   </div>
 {/if}
 
@@ -78,8 +79,15 @@
     cursor: zoom-out;
   }
 
-  img {
+  .image-button {
     position: relative;
+    display: block;
+    padding: 0;
+    line-height: 0;
+    cursor: zoom-out;
+  }
+
+  img {
     /* 元解像度を超えて引き伸ばさない */
     width: auto;
     height: auto;
@@ -94,17 +102,8 @@
     color: var(--text-dim);
   }
 
-  .close {
-    position: absolute;
-    top: calc(12px + var(--safe-top));
-    right: 12px;
-    display: grid;
-    place-items: center;
-    width: var(--tap);
-    height: var(--tap);
-    border-radius: 50%;
-    background: color-mix(in srgb, var(--bg-elevated) 85%, transparent);
-    color: var(--text);
-    font-size: 16px;
+  .sep {
+    margin: 0 6px;
+    opacity: 0.5;
   }
 </style>

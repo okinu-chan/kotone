@@ -41,18 +41,27 @@ def list_albums(
     genre_id: int | None = None,
     year: int | None = None,
     q: str | None = None,
+    codec: str | None = None,
+    quality: Literal["hires", "cd", "dsd"] | None = None,
     limit: int | None = Query(default=None, ge=1, le=2000),
     offset: int = Query(default=0, ge=0),
 ) -> dict[str, Any]:
     items = ctx.repo.list_albums(
         sort=sort, initial=initial, initial_group=initial_group, artist_id=artist_id,
-        genre_id=genre_id, year=year, query=q, limit=limit, offset=offset,
+        genre_id=genre_id, year=year, query=q, codec=codec, quality=quality,
+        limit=limit, offset=offset,
     )
     total = ctx.repo.count_albums(
         initial=initial, initial_group=initial_group, artist_id=artist_id,
-        genre_id=genre_id, year=year, query=q,
+        genre_id=genre_id, year=year, query=q, codec=codec, quality=quality,
     )
     return {"items": items, "total": total, "offset": offset}
+
+
+@router.get("/formats")
+def list_formats(ctx: Ctx) -> dict[str, Any]:
+    """ライブラリに実在するフォーマット・音質（絞り込みの選択肢）。"""
+    return ctx.repo.list_formats()
 
 
 @router.get("/albums/{album_id}")
@@ -110,13 +119,15 @@ def list_tracks(
     initial: str | None = None,
     initial_group: Literal["kana", "latin"] | None = None,
     q: str | None = None,
+    codec: str | None = None,
+    quality: Literal["hires", "cd", "dsd"] | None = None,
     limit: int | None = Query(default=None, ge=1, le=5000),
     offset: int = Query(default=0, ge=0),
 ) -> dict[str, Any]:
     items = ctx.repo.list_tracks(
         sort=sort, album_id=album_id, artist_id=artist_id, genre_id=genre_id,
         year=year, initial=initial, initial_group=initial_group,
-        query=q, limit=limit, offset=offset,
+        query=q, codec=codec, quality=quality, limit=limit, offset=offset,
     )
     return {"items": items, "total": len(items), "offset": offset}
 

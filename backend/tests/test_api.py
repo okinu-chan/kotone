@@ -85,6 +85,37 @@ def test_search_matches_name_and_reading(client: TestClient) -> None:
     assert any(t["title"] == "First Love" for t in payload["tracks"])
 
 
+def test_formats_endpoint_lists_only_present_formats(client: TestClient) -> None:
+    """絞り込みの選択肢は、実際にライブラリへ入っているものだけを返す。"""
+    payload = client.get("/api/library/formats").json()
+    codecs = {c["codec"] for c in payload["codecs"]}
+    assert codecs == {"flac"}
+    # デモ音源は 44.1kHz/16bit のみなので CD 品質だけが出る
+    assert {q["key"] for q in payload["qualities"]} == {"cd"}
+
+
+def test_filter_albums_by_codec(client: TestClient) -> None:
+    assert client.get("/api/library/albums", params={"codec": "flac"}).json()["total"] == 3
+    assert client.get("/api/library/albums", params={"codec": "mp3"}).json()["total"] == 0
+
+
+def test_filter_tracks_by_quality(client: TestClient) -> None:
+    cd = client.get("/api/library/tracks", params={"quality": "cd"}).json()
+    assert cd["total"] == len(LIBRARY)
+    hires = client.get("/api/library/tracks", params={"quality": "hires"}).json()
+    assert hires["total"] == 0
+
+
+def test_artist_albums_sorted_by_name(client: TestClient) -> None:
+    """アーティスト詳細のアルバムはアルバム名順（リリース年順ではない）。"""
+    artists = client.get("/api/library/artists").json()["items"]
+    utada = next(a for a in artists if a["name"] == "宇多田ヒカル")
+    detail = client.get(f"/api/library/artists/{utada['id']}").json()
+    names = [a["name"] for a in detail["albums"]]
+    keys = {a["name"]: a["sort_key"] for a in detail["albums"]}
+    assert names == sorted(names, key=lambda n: keys[n])
+
+
 def test_genres_and_years(client: TestClient) -> None:
     genres = client.get("/api/library/genres").json()["items"]
     assert {g["name"] for g in genres} == {"J-Pop", "Alternative"}

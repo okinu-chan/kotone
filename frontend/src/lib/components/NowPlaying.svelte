@@ -9,6 +9,8 @@
    */
   import AlbumArt from './AlbumArt.svelte';
   import ArtworkViewer from './ArtworkViewer.svelte';
+  import Modal from './Modal.svelte';
+  import ScrollingTitle from './ScrollingTitle.svelte';
   import { api } from '../api.js';
   import { formatCodec, formatQuality, formatTime, ORDER_LABELS, REPEAT_LABELS } from '../format.js';
   import { player, toast } from '../stores.svelte.js';
@@ -19,6 +21,7 @@
   const progress = $derived(player.duration > 0 ? (player.elapsed / player.duration) * 100 : 0);
 
   let zoomOpen = $state(false);
+  let fullTitleOpen = $state(false);
 
   const REPEAT_ORDER = ['off', 'range', 'one'];
   const PLAY_ORDER = ['normal', 'shuffle', 'random'];
@@ -110,7 +113,12 @@
   <ArtworkViewer bind:open={zoomOpen} {album} alt={track ? `${track.title} のアートワーク` : ''} />
 
   <div class="meta">
-    <h1 class="title clamp-2">{track?.title ?? '再生していません'}</h1>
+    <h1 class="title">
+      <ScrollingTitle
+        text={track?.title ?? '再生していません'}
+        onfulltext={() => (fullTitleOpen = true)}
+      />
+    </h1>
 
     <div class="chips">
       {#each track?.artists ?? [] as artist (artist.id)}
@@ -242,6 +250,23 @@
   {/if}
 </section>
 
+<!-- 長いタイトルの全文表示（スクロールを待たずに読めるように） -->
+<Modal bind:open={fullTitleOpen} title="曲名">
+  <p class="full-title">{track?.title ?? ''}</p>
+  {#if track}
+    <dl class="full-meta">
+      {#if track.artist}
+        <dt>アーティスト</dt>
+        <dd>{track.artist}</dd>
+      {/if}
+      {#if track.album}
+        <dt>アルバム</dt>
+        <dd>{track.album}</dd>
+      {/if}
+    </dl>
+  {/if}
+</Modal>
+
 <style>
   .now {
     display: flex;
@@ -285,9 +310,35 @@
     gap: 10px;
   }
 
+  /* 曲名は 1 行に固定する（折り返してアートワークや操作部を押し下げない） */
   .title {
-    font-size: 22px;
-    line-height: 1.35;
+    min-width: 0;
+  }
+
+  .full-title {
+    margin: 0 0 16px;
+    font-size: 18px;
+    font-weight: 600;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+  }
+
+  .full-meta {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 8px 16px;
+    margin: 0;
+    font-size: 13px;
+  }
+
+  .full-meta dt {
+    color: var(--text-dim);
+    white-space: nowrap;
+  }
+
+  .full-meta dd {
+    margin: 0;
+    overflow-wrap: anywhere;
   }
 
   .chips {

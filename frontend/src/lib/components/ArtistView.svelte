@@ -8,6 +8,7 @@
    */
   import AddToPlaylist from './AddToPlaylist.svelte';
   import AlbumGrid from './AlbumGrid.svelte';
+  import ArtistEditor from './ArtistEditor.svelte';
   import PageHeader from './PageHeader.svelte';
   import TrackList from './TrackList.svelte';
   import { api } from '../api.js';
@@ -20,6 +21,7 @@
   let loading = $state(true);
   let tab = $state('albums');
   let addOpen = $state(false);
+  let editorOpen = $state(false);
 
   $effect(() => {
     const artistId = id;
@@ -65,7 +67,17 @@
 <PageHeader
   title={artist?.name ?? 'アーティスト'}
   subtitle={artist?.reading && artist.reading !== artist.name ? artist.reading : ''}
-/>
+>
+  {#snippet actions()}
+    {#if artist}
+      <button
+        class="icon-btn"
+        onclick={() => (editorOpen = true)}
+        aria-label="アーティスト情報を編集">✎</button
+      >
+    {/if}
+  {/snippet}
+</PageHeader>
 
 {#if loading}
   <div class="loading"><div class="spinner"></div></div>
@@ -102,11 +114,32 @@
   {/if}
 
   <AddToPlaylist bind:open={addOpen} artistId={artist.id} />
+  <ArtistEditor
+    bind:open={editorOpen}
+    {artist}
+    onsaved={(updated) => (artist = { ...artist, ...updated })}
+  />
 {:else}
   <p class="empty-state">アーティストが見つかりません。</p>
 {/if}
 
 <style>
+  .icon-btn {
+    display: grid;
+    place-items: center;
+    width: var(--tap);
+    height: var(--tap);
+    border-radius: 50%;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    font-size: 15px;
+  }
+
+  .icon-btn:hover {
+    background: var(--surface-hover);
+    border-color: var(--accent-dim);
+  }
+
   .loading {
     display: grid;
     place-items: center;
