@@ -55,12 +55,12 @@
   }
 
   h1 {
-    font-size: 17px;
+    font-size: var(--fs-xl);
   }
 
   p {
     margin: 0;
-    font-size: 12px;
+    font-size: var(--fs-sm);
   }
 
   .actions {

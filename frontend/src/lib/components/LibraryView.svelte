@@ -78,6 +78,23 @@
       codec: libraryView.codec,
       quality: libraryView.quality,
     };
+
+    // 条件が前回と同じなら、取得済みの一覧をそのまま出す。
+    // 1,000 件規模では再取得と再描画だけで待たされるため、
+    // 他画面から戻ったときに読み込み待ちを挟まないようにする。
+    const key = libraryView.cacheKey;
+    if (libraryView.cache.key === key) {
+      const cached = libraryView.cache;
+      albums = cached.albums;
+      artists = cached.artists;
+      genres = cached.genres;
+      years = cached.years;
+      total = cached.total;
+      loading = false;
+      restoreScroll();
+      return;
+    }
+
     loading = true;
 
     const load = async () => {
@@ -101,20 +118,28 @@
     };
 
     load()
+      .then(() => {
+        libraryView.cache = { key, albums, artists, genres, years, total };
+      })
       .catch((error) => toast.error(error.detail || String(error)))
       .finally(() => {
         loading = false;
-        // 一覧が描画されてからスクロール位置を戻す。
-        // 戻ってきた直後は中身が空で高さが足りないため、描画後まで待つ必要がある。
-        const saved = router.savedScroll('/library');
-        if (!restoredScroll && saved > 0) {
-          restoredScroll = true;
-          requestAnimationFrame(() => {
-            requestAnimationFrame(() => window.scrollTo(0, saved));
-          });
-        }
+        restoreScroll();
       });
   });
+
+  /**
+   * 一覧が描画されてからスクロール位置を戻す。
+   * 戻ってきた直後は中身が空で高さが足りないため、描画後まで待つ必要がある。
+   */
+  function restoreScroll() {
+    const saved = router.savedScroll('/library');
+    if (restoredScroll || saved <= 0) return;
+    restoredScroll = true;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => window.scrollTo(0, saved));
+    });
+  }
 
   function switchView(key) {
     libraryView.view = key;
@@ -311,14 +336,14 @@
     background: var(--surface);
     border: 1px solid var(--border);
     color: var(--text-muted);
-    font-size: 13px;
+    font-size: var(--fs-md);
     white-space: nowrap;
   }
 
   .views button.active {
     background: var(--accent);
     border-color: var(--accent);
-    color: #0d0f13;
+    color: var(--on-accent);
   }
 
   .right-tools {
@@ -343,12 +368,12 @@
     min-height: 36px;
     background: var(--surface);
     color: var(--text-dim);
-    font-size: 15px;
+    font-size: var(--fs-lg);
   }
 
   .layout-toggle button.active {
     background: var(--accent);
-    color: #0d0f13;
+    color: var(--on-accent);
   }
 
   /* 絞り込みは 1 つのボタンに集約する（軸が増えてもツールバーが膨らまない） */
@@ -363,7 +388,7 @@
     border: 1px solid var(--border);
     background: var(--surface);
     color: var(--text-muted);
-    font-size: 13px;
+    font-size: var(--fs-md);
     white-space: nowrap;
   }
 
@@ -380,7 +405,7 @@
     padding: 0 5px;
     border-radius: 999px;
     background: var(--accent);
-    color: #0d0f13;
+    color: var(--on-accent);
     font-size: 11px;
   }
 
@@ -394,7 +419,7 @@
     gap: 8px;
     padding: 8px 14px;
     background: color-mix(in srgb, var(--accent) 14%, var(--bg));
-    font-size: 13px;
+    font-size: var(--fs-md);
     overflow-x: auto;
     scrollbar-width: none;
   }
@@ -414,7 +439,7 @@
     border: 1px solid var(--accent-dim);
     background: color-mix(in srgb, var(--bg) 60%, transparent);
     color: var(--accent);
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     white-space: nowrap;
   }
 
@@ -428,7 +453,7 @@
     min-height: 32px;
     padding: 0 10px;
     color: var(--text-muted);
-    font-size: 12px;
+    font-size: var(--fs-sm);
     white-space: nowrap;
   }
 
@@ -465,15 +490,15 @@
   }
 
   .name {
-    font-size: 15px;
+    font-size: var(--fs-lg);
   }
 
   .reading {
-    font-size: 11.5px;
+    font-size: var(--fs-xs);
   }
 
   .count {
     flex: none;
-    font-size: 12px;
+    font-size: var(--fs-sm);
   }
 </style>

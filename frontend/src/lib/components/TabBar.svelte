@@ -75,7 +75,7 @@
   }
 
   .icon {
-    font-size: 17px;
+    font-size: var(--fs-xl);
     line-height: 1;
   }
 
@@ -92,7 +92,7 @@
     .tab {
       flex-direction: row;
       gap: 8px;
-      font-size: 13px;
+      font-size: var(--fs-md);
     }
   }
 </style>

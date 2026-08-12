@@ -21,12 +21,21 @@ class FakeMPD:
         self.connected = True
         self.state = state
         self.calls: list[tuple] = []
+        self.elapsed = 0.0
+        self.song_id = "1"
+        #: 再開時に進んでしまう秒数（実機で 1〜3 秒観測された）
+        self.resume_drift = 0.0
 
     def on_event(self, cb) -> None:  # noqa: ANN001
         pass
 
     async def status(self) -> dict:
-        return {"volume": self.volume, "state": self.state}
+        return {
+            "volume": self.volume,
+            "state": self.state,
+            "elapsed": self.elapsed,
+            "songid": self.song_id,
+        }
 
     async def current_song(self) -> dict:
         return dict(self.song)
@@ -40,7 +49,15 @@ class FakeMPD:
         self.calls.append(("play", position))
 
     async def seek(self, seconds: float) -> None:
+        self.elapsed = seconds
         self.calls.append(("seek", seconds))
+
+    async def pause(self, paused: bool | None = None) -> None:
+        self.state = "pause" if paused else "play"
+        self.calls.append(("pause", paused))
+        # 再開時にバッファ分だけ位置が進む MPD の挙動を模す
+        if paused is False:
+            self.elapsed += self.resume_drift
 
 
 class FakeRepo:
@@ -213,6 +230,68 @@ async def test_warmup_disabled_by_setting(db, settings) -> None:
     await ctrl._start_with_warmup(1)
 
     assert [c[0] for c in mpd.calls] == ["play"]
+
+
+# ------------------------------------------ 一時停止からの再開（位置ズレの補正）
+
+
+async def test_resume_returns_to_paused_position(db, settings) -> None:
+    """再開時にバッファ分だけ進んでしまう位置を、止めた位置へ戻す。"""
+    mpd = FakeMPD(state="play")
+    mpd.elapsed = 42.0
+    mpd.resume_drift = 3.2          # 実機で観測された飛び
+    ctrl = PlaybackController(mpd, db, FakeRepo({}), settings, EventBus())
+
+    await ctrl.pause()
+    assert ctrl._paused_at == pytest.approx(42.0)
+
+    await ctrl.play()
+    # 45.2 まで進んだあと 42.0 へ戻る
+    assert ("seek", pytest.approx(42.0)) in mpd.calls
+    assert mpd.elapsed == pytest.approx(42.0)
+
+
+async def test_resume_without_drift_does_not_seek(db, settings) -> None:
+    """ズレが無ければ余計なシークをしない（不要な音の途切れを避ける）。"""
+    mpd = FakeMPD(state="play")
+    mpd.elapsed = 10.0
+    mpd.resume_drift = 0.05
+    ctrl = PlaybackController(mpd, db, FakeRepo({}), settings, EventBus())
+
+    await ctrl.pause()
+    await ctrl.play()
+    assert not any(call[0] == "seek" for call in mpd.calls)
+
+
+async def test_manual_seek_discards_paused_position(db, settings) -> None:
+    """一時停止中に手動シークしたら、控えていた位置は使わない。"""
+    mpd = FakeMPD(state="play")
+    mpd.elapsed = 30.0
+    mpd.resume_drift = 2.0
+    ctrl = PlaybackController(mpd, db, FakeRepo({}), settings, EventBus())
+
+    await ctrl.pause()
+    await ctrl.seek(90.0)
+    assert ctrl._paused_at is None
+
+    mpd.calls.clear()
+    await ctrl.play()
+    # 30 秒へ戻されたりしない
+    assert not any(call == ("seek", 30.0) for call in mpd.calls)
+
+
+async def test_resume_after_song_change_does_not_seek(db, settings) -> None:
+    """一時停止中に曲が変わった場合は、前の曲の位置へ戻さない。"""
+    mpd = FakeMPD(state="play")
+    mpd.elapsed = 20.0
+    ctrl = PlaybackController(mpd, db, FakeRepo({}), settings, EventBus())
+
+    await ctrl.pause()
+    mpd.song_id = "2"           # 別の曲になった
+    mpd.elapsed = 0.0
+    mpd.calls.clear()
+    await ctrl.play()
+    assert not any(call[0] == "seek" for call in mpd.calls)
 
 
 async def test_external_mode_ignores_external_volume_events(controller) -> None:

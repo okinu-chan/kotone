@@ -189,6 +189,7 @@
   </div>
 
   <div class="transport">
+    <!-- 再生順（通常／シャッフル／ランダム）。線画の透過ピクトグラム -->
     <button
       class="mode"
       class:active={player.state.order !== 'normal'}
@@ -196,13 +197,27 @@
       title={ORDER_LABELS[player.state.order]}
       aria-label={ORDER_LABELS[player.state.order]}
     >
-      {#if player.state.order === 'random'}
-        <span class="mode-icon">🎲</span>
-      {:else if player.state.order === 'shuffle'}
-        <span class="mode-icon">🔀</span>
-      {:else}
-        <span class="mode-icon">➡</span>
-      {/if}
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+           stroke-linecap="round" stroke-linejoin="round">
+        {#if player.state.order === 'shuffle'}
+          <!-- 交差する2本の経路＝重複なしシャッフル -->
+          <path d="M3 7h3.5l4 10H17" />
+          <path d="M3 17h3.5l4-10H17" />
+          <path d="M14.5 4.5 17.5 7l-3 2.5" />
+          <path d="M14.5 14.5 17.5 17l-3 2.5" />
+        {:else if player.state.order === 'random'}
+          <!-- サイコロ＝毎回独立に抽選するランダム -->
+          <rect x="4" y="4" width="16" height="16" rx="3.5" />
+          <circle cx="9" cy="9" r="1.15" fill="currentColor" stroke="none" />
+          <circle cx="15" cy="15" r="1.15" fill="currentColor" stroke="none" />
+          <circle cx="15" cy="9" r="1.15" fill="currentColor" stroke="none" />
+          <circle cx="9" cy="15" r="1.15" fill="currentColor" stroke="none" />
+        {:else}
+          <!-- 直線の矢印＝タグ順の通常再生 -->
+          <path d="M3 12h15" />
+          <path d="M14.5 8.5 18 12l-3.5 3.5" />
+        {/if}
+      </svg>
     </button>
 
     <button class="skip" onclick={() => player.command(api.previous)} aria-label="前の曲">
@@ -227,6 +242,7 @@
       >
     </button>
 
+    <!-- リピート（オフ／範囲／1曲）。線画の透過ピクトグラム -->
     <button
       class="mode"
       class:active={player.state.repeat !== 'off'}
@@ -234,7 +250,17 @@
       title={REPEAT_LABELS[player.state.repeat]}
       aria-label={REPEAT_LABELS[player.state.repeat]}
     >
-      <span class="mode-icon">{player.state.repeat === 'one' ? '🔂' : '🔁'}</span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+           stroke-linecap="round" stroke-linejoin="round">
+        <path d="M17 3.5 20 6l-3 2.5" />
+        <path d="M20 6H7a3.5 3.5 0 0 0-3.5 3.5V11" />
+        <path d="M7 20.5 4 18l3-2.5" />
+        <path d="M4 18h13a3.5 3.5 0 0 0 3.5-3.5V13" />
+        {#if player.state.repeat === 'one'}
+          <!-- 中央の「1」で 1 曲リピートを示す -->
+          <path d="M11.2 10.4 12.4 9.6V15" />
+        {/if}
+      </svg>
     </button>
   </div>
 
@@ -298,7 +324,7 @@
     border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
     border-radius: var(--radius);
     padding: 12px 14px;
-    font-size: 14px;
+    font-size: var(--fs-lg);
   }
 
   .offline p {
@@ -344,7 +370,7 @@
     grid-template-columns: auto 1fr;
     gap: 8px 16px;
     margin: 0;
-    font-size: 13px;
+    font-size: var(--fs-md);
   }
 
   .full-meta dt {
@@ -371,7 +397,7 @@
     background: var(--surface);
     border: 1px solid var(--border);
     color: var(--text);
-    font-size: 13px;
+    font-size: var(--fs-md);
     max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -386,7 +412,7 @@
 
   .quality {
     margin: 0;
-    font-size: 12px;
+    font-size: var(--fs-sm);
   }
 
   .sep {
@@ -406,13 +432,34 @@
     border: none;
   }
 
-  input[type='range']::-webkit-slider-runnable-track {
+  /* 再生済みの部分に軌跡を残す（--progress は再生位置の割合） */
+  .seek input[type='range']::-webkit-slider-runnable-track {
     height: 4px;
     border-radius: 2px;
-    background: var(--border);
+    background: linear-gradient(
+      to right,
+      var(--accent) 0%,
+      var(--accent) var(--progress, 0%),
+      var(--border) var(--progress, 0%),
+      var(--border) 100%
+    );
   }
 
-  input[type='range']::-moz-range-track {
+  .seek input[type='range']::-moz-range-track {
+    height: 4px;
+    border-radius: 2px;
+    background: linear-gradient(
+      to right,
+      var(--accent) 0%,
+      var(--accent) var(--progress, 0%),
+      var(--border) var(--progress, 0%),
+      var(--border) 100%
+    );
+  }
+
+  /* 音量スライダーは軌跡を付けない（現在値だけ分かればよい） */
+  .volume input[type='range']::-webkit-slider-runnable-track,
+  .volume input[type='range']::-moz-range-track {
     height: 4px;
     border-radius: 2px;
     background: var(--border);
@@ -427,6 +474,10 @@
     border-radius: 50%;
     background: var(--accent);
     border: none;
+    /* 外側に光彩を入れて光っているように見せる */
+    box-shadow:
+      0 0 8px 1px var(--accent-glow),
+      0 0 16px 2px var(--accent-glow);
   }
 
   input[type='range']::-moz-range-thumb {
@@ -435,13 +486,16 @@
     border-radius: 50%;
     background: var(--accent);
     border: none;
+    box-shadow:
+      0 0 8px 1px var(--accent-glow),
+      0 0 16px 2px var(--accent-glow);
   }
 
   .times {
     display: flex;
     justify-content: space-between;
     align-items: baseline;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     margin-top: -4px;
   }
 
@@ -467,40 +521,86 @@
     color: var(--text);
   }
 
+  /* 曲送り・曲戻し・再生は白抜きのサークルで囲む */
+  .skip,
+  .play {
+    border: 1.5px solid var(--text);
+    background: transparent;
+    transition:
+      box-shadow 0.2s,
+      border-color 0.2s,
+      transform 0.1s;
+  }
+
+  .skip {
+    width: 52px;
+    height: 52px;
+    /* 外側へ広がる光彩 */
+    box-shadow:
+      0 0 10px -2px var(--accent-glow),
+      0 0 0 1px rgb(255 255 255 / 0.06);
+  }
+
+  .skip:hover {
+    border-color: var(--accent);
+    box-shadow: 0 0 16px -1px var(--accent-glow);
+  }
+
   .transport svg {
-    width: 30px;
-    height: 30px;
+    width: 26px;
+    height: 26px;
   }
 
   .play {
-    width: 68px;
-    height: 68px;
-    background: var(--accent);
-    color: #0d0f13 !important;
+    width: 72px;
+    height: 72px;
+    border-width: 2px;
+    border-color: var(--accent);
+    color: var(--accent);
+    box-shadow:
+      0 0 22px -2px var(--accent-glow),
+      inset 0 0 14px -6px var(--accent-glow);
+  }
+
+  .play:hover {
+    box-shadow:
+      0 0 30px 0 var(--accent-glow),
+      inset 0 0 18px -6px var(--accent-glow);
+  }
+
+  .play:active {
+    transform: scale(0.96);
   }
 
   .play svg {
-    width: 34px;
-    height: 34px;
+    width: 32px;
+    height: 32px;
   }
 
+  /* リピート・シャッフルは塗りのない線画（透過ピクトグラム） */
   .mode {
     color: var(--text-dim) !important;
-    font-size: 20px;
+    background: transparent;
+    border: none;
+  }
+
+  .mode svg {
+    width: 24px;
+    height: 24px;
   }
 
   .mode.active {
     color: var(--accent) !important;
   }
 
-  .mode-icon {
-    line-height: 1;
+  .mode.active svg {
+    filter: drop-shadow(0 0 6px var(--accent-glow));
   }
 
   .mode-labels {
     margin: -8px 0 0;
     text-align: center;
-    font-size: 12px;
+    font-size: var(--fs-sm);
   }
 
   .volume {
@@ -512,7 +612,7 @@
   .vol-value {
     min-width: 2.5em;
     text-align: right;
-    font-size: 13px;
+    font-size: var(--fs-md);
   }
 
   .album-link {
@@ -521,7 +621,7 @@
     border: 1px solid var(--border);
     background: var(--surface);
     color: var(--text-muted);
-    font-size: 14px;
+    font-size: var(--fs-lg);
   }
 
   .album-link:hover {

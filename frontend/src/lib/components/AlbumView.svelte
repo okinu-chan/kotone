@@ -171,7 +171,7 @@
     border-radius: 50%;
     background: var(--surface);
     border: 1px solid var(--border);
-    font-size: 15px;
+    font-size: var(--fs-lg);
   }
 
   .icon-btn:hover {
@@ -208,7 +208,7 @@
   }
 
   h2 {
-    font-size: 20px;
+    font-size: calc(var(--fs-xl) * 1.18);
   }
 
   .chips {
@@ -224,7 +224,7 @@
     border-radius: 999px;
     background: var(--surface);
     border: 1px solid var(--border);
-    font-size: 13px;
+    font-size: var(--fs-md);
   }
 
   .chip:hover {
@@ -234,7 +234,7 @@
 
   .info p {
     margin: 0;
-    font-size: 12px;
+    font-size: var(--fs-sm);
   }
 
   .sep {
@@ -255,12 +255,12 @@
     min-height: var(--tap);
     padding: 0 24px;
     border-radius: 999px;
-    font-size: 14px;
+    font-size: var(--fs-lg);
   }
 
   .primary {
     background: var(--accent);
-    color: #0d0f13;
+    color: var(--on-accent);
   }
 
   .ghost {
@@ -281,7 +281,7 @@
     margin: 0;
     padding: 16px 16px 6px;
     border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
-    font-size: 12px;
+    font-size: var(--fs-sm);
     letter-spacing: 0.06em;
   }
 
@@ -295,7 +295,7 @@
   }
 
   .disc-count {
-    font-size: 11.5px;
+    font-size: var(--fs-xs);
   }
 
   @media (min-width: 760px) {

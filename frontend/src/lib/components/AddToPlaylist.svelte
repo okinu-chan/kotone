@@ -101,8 +101,8 @@
     padding: 0 16px;
     border-radius: var(--radius);
     background: var(--accent);
-    color: #0d0f13;
-    font-size: 14px;
+    color: var(--on-accent);
+    font-size: var(--fs-lg);
     white-space: nowrap;
   }
 
@@ -124,7 +124,7 @@
     min-height: var(--tap);
     padding: 8px 4px;
     text-align: left;
-    font-size: 14px;
+    font-size: var(--fs-lg);
   }
 
   .list button:hover {

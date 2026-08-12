@@ -92,11 +92,11 @@
   }
 
   .title {
-    font-size: 14px;
+    font-size: var(--fs-lg);
   }
 
   .artist {
-    font-size: 12px;
+    font-size: var(--fs-sm);
   }
 
   .control {

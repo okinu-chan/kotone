@@ -38,6 +38,9 @@ ORDER_MODES: tuple[str, ...] = ("normal", "shuffle", "random")
 #: ランダムモードで先読みしておく曲数（gapless のために 1 曲だけ先行させる）
 RANDOM_LOOKAHEAD = 1
 
+#: 一時停止からの再開時、これ以上ずれていたら止めた位置へ戻す（秒）
+RESUME_DRIFT_TOLERANCE = 0.4
+
 
 @dataclass
 class PlayScope:
@@ -80,6 +83,9 @@ class PlaybackController:
         self._random = _RandomState()
         self._expected_volume: int | None = None
         self._last_song_id: str | None = None
+        # 一時停止した位置と、そのときの曲（再開時のズレ補正に使う）
+        self._paused_at: float | None = None
+        self._paused_song_id: str | None = None
         self._lock = asyncio.Lock()
         self._cached_state: dict[str, Any] = {}
 
@@ -226,17 +232,44 @@ class PlaybackController:
         status = await self.mpd.status()
         state = status.get("state")
         if state == "play":
-            await self.mpd.pause(True)
+            await self.pause()
         elif state == "pause":
-            await self.mpd.pause(False)
+            await self._resume()
         else:
             await self.mpd.play()
 
     async def play(self) -> None:
-        await self.mpd.play()
+        status = await self.mpd.status()
+        if status.get("state") == "pause":
+            await self._resume()
+        else:
+            await self.mpd.play()
 
     async def pause(self) -> None:
+        # 再開時に同じ位置へ戻せるよう、止めた位置を控えておく
+        status = await self.mpd.status()
+        self._paused_at = _float_or_none(status.get("elapsed"))
+        self._paused_song_id = status.get("songid")
         await self.mpd.pause(True)
+
+    async def _resume(self) -> None:
+        """一時停止から再開する。止めた位置とのズレを補正する。
+
+        MPD は出力バッファに溜めた分を破棄して再開するため、止めた位置より
+        数秒先から鳴り始めることがある（実測で 1〜3 秒）。バッファ量に依存する
+        挙動なので、止めた位置を控えておいて再開後に戻す。
+        """
+        await self.mpd.pause(False)
+        if self._paused_at is None:
+            return
+        status = await self.mpd.status()
+        if status.get("songid") != self._paused_song_id:
+            self._paused_at = None
+            return
+        elapsed = _float_or_none(status.get("elapsed"))
+        if elapsed is not None and abs(elapsed - self._paused_at) > RESUME_DRIFT_TOLERANCE:
+            await self.mpd.seek(self._paused_at)
+        self._paused_at = None
 
     async def stop(self) -> None:
         await self.mpd.stop()
@@ -263,6 +296,8 @@ class PlaybackController:
         await self.mpd.previous()
 
     async def seek(self, seconds: float) -> None:
+        # 手動シーク後は、一時停止位置の記録が古くなるので捨てる
+        self._paused_at = None
         await self.mpd.seek(max(0.0, seconds))
 
     # ============================================================ モード
@@ -329,20 +364,38 @@ class PlaybackController:
                     await self.mpd.seek(elapsed)
 
     async def _leave_random_mode(self) -> None:
-        """スコープの全曲をキューへ戻す（通常／シャッフルへの復帰）。"""
+        """スコープの全曲をキューへ戻す（通常／シャッフルへの復帰）。
+
+        キューを作り直すため再生が止まる。再生位置を控えておき、
+        同じ曲の同じ位置から続けられるようにする（モードを一巡させても
+        曲の先頭に巻き戻らないようにするため）。
+        """
         tracks = await asyncio.to_thread(
             self.repo.resolve_scope, self.scope.kind, self.scope.id
         )
         if not tracks:
             return
+
+        status = await self.mpd.status()
         current = await self.mpd.current_song()
         current_path = current.get("file")
+        elapsed = float(status.get("elapsed") or 0)
+        was_playing = status.get("state") == "play"
+
         await self.mpd.clear()
         await self.mpd.add_many(t["path"] for t in tracks)
-        if current_path:
-            index = next((i for i, t in enumerate(tracks) if t["path"] == current_path), None)
-            if index is not None:
-                await self.mpd.play(index)
+        if not current_path:
+            return
+
+        index = next((i for i, t in enumerate(tracks) if t["path"] == current_path), None)
+        if index is None:
+            return
+
+        await self.mpd.play(index)
+        if elapsed > 1.0:
+            await self.mpd.seek(elapsed)
+        if not was_playing:
+            await self.mpd.pause(True)
 
     async def _fill_random_queue(self, *, first: str | None = None) -> None:
         if first:
@@ -575,6 +628,13 @@ class PlaybackController:
 def _int_or_none(value: Any) -> int | None:
     try:
         return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _float_or_none(value: Any) -> float | None:
+    try:
+        return float(value)
     except (TypeError, ValueError):
         return None
 

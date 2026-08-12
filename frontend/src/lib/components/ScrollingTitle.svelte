@@ -54,7 +54,8 @@
     </button>
     <span class="hint dim" aria-hidden="true">…</span>
   {:else}
-    <div class="viewport" bind:this={viewport}>
+    <!-- 画面内に収まる場合は中央揃えで見せる -->
+    <div class="viewport centered" bind:this={viewport}>
       <span class="inner" bind:this={inner}>{text}</span>
     </div>
   {/if}
@@ -81,10 +82,15 @@
     cursor: pointer;
   }
 
+  /* 収まる場合は中央揃え。スクロールする場合は左揃えのまま流す */
+  .viewport.centered {
+    text-align: center;
+  }
+
   .inner {
     display: inline-block;
     white-space: nowrap;
-    font-size: 22px;
+    font-size: var(--fs-title);
     font-weight: 600;
     line-height: 1.35;
   }
@@ -113,7 +119,7 @@
 
   @media (min-width: 900px) {
     .inner {
-      font-size: 26px;
+      font-size: calc(var(--fs-title) * 1.18);
     }
   }
 

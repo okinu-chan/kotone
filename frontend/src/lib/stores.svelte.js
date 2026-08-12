@@ -155,6 +155,7 @@ class SettingsStore {
       this.specs = payload.specs;
       this.loaded = true;
       applyTheme(this.values.theme);
+      applyFontSize(this.values.font_size);
     } catch (error) {
       toast.error(error.detail || String(error));
     }
@@ -167,6 +168,7 @@ class SettingsStore {
       const payload = await api.updateSettings({ [key]: value });
       this.values = payload.values;
       if (key === 'theme') applyTheme(payload.values.theme);
+      if (key === 'font_size') applyFontSize(payload.values.font_size);
     } catch (error) {
       this.values = { ...this.values, [key]: previous };
       toast.error(error.detail || String(error));
@@ -178,6 +180,19 @@ export const settings = new SettingsStore();
 
 export function applyTheme(theme) {
   document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
+}
+
+/**
+ * 文字サイズの倍率を適用する。
+ *
+ * 要素ごとに pt を指定させると、曲名だけ極端に大きいといった破綻した組み合わせが
+ * 作れてしまい、検証範囲も広がる。全体を一律に拡大縮小して大小関係を保つ。
+ */
+const FONT_SCALES = { small: 0.9, normal: 1, large: 1.15 };
+
+export function applyFontSize(size) {
+  const scale = FONT_SCALES[size] ?? 1;
+  document.documentElement.style.setProperty('--font-scale', String(scale));
 }
 
 /* ------------------------------------------------------------------ 通知 */
@@ -229,6 +244,31 @@ class LibraryViewState {
   scrollY = $state(0);
   /** 設定から初期値を読み込んだかどうか */
   initialised = $state(false);
+
+  /**
+   * 取得済みの一覧。
+   *
+   * 1,000 件規模だと再取得と再描画だけで待たされるため、条件が変わって
+   * いなければ前回の結果をそのまま出す。再生中画面やダイレクトサーチから
+   * 戻ってきたときに、読み込み待ちを挟まず即座に表示できる。
+   */
+  cache = $state({ key: null, albums: [], artists: [], genres: [], years: [], total: 0 });
+
+  /** いまの表示条件を表すキー。これが一致すればキャッシュを使える。 */
+  get cacheKey() {
+    return [
+      this.view,
+      this.sort,
+      this.initial ?? '',
+      this.initialGroup ?? '',
+      this.codec ?? '',
+      this.quality ?? '',
+    ].join('|');
+  }
+
+  invalidateCache() {
+    this.cache = { key: null, albums: [], artists: [], genres: [], years: [], total: 0 };
+  }
 
   /** 適用中の絞り込み条件（チップ表示用）。 */
   get activeFilters() {

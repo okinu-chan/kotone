@@ -11,7 +11,7 @@
    */
   import Modal from './Modal.svelte';
   import { api } from '../api.js';
-  import { toast } from '../stores.svelte.js';
+  import { libraryView, toast } from '../stores.svelte.js';
 
   let { open = $bindable(false), artist = null, onsaved } = $props();
 
@@ -39,6 +39,7 @@
     busy = true;
     try {
       const updated = await api.updateArtist(artist.id, { name, reading });
+      libraryView.invalidateCache();
       toast.info('保存しました');
       onsaved?.(updated);
       open = false;
@@ -90,7 +91,7 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
-    font-size: 13px;
+    font-size: var(--fs-md);
   }
 
   label > span {
@@ -102,17 +103,17 @@
   }
 
   small {
-    font-size: 11.5px;
+    font-size: var(--fs-xs);
     line-height: 1.45;
   }
 
   .note {
     margin: 0;
-    font-size: 11.5px;
+    font-size: var(--fs-xs);
   }
 
   .link {
-    font-size: 12px;
+    font-size: var(--fs-sm);
     color: var(--accent);
   }
 
@@ -121,12 +122,12 @@
     min-height: var(--tap);
     padding: 0 18px;
     border-radius: var(--radius);
-    font-size: 14px;
+    font-size: var(--fs-lg);
   }
 
   .primary {
     background: var(--accent);
-    color: #0d0f13;
+    color: var(--on-accent);
   }
 
   .ghost {

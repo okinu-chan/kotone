@@ -99,7 +99,7 @@
     width: 26px;
     flex: none;
     text-align: right;
-    font-size: 13px;
+    font-size: var(--fs-md);
   }
 
   .playing {
@@ -121,7 +121,7 @@
   }
 
   .title {
-    font-size: 15px;
+    font-size: var(--fs-lg);
   }
 
   li.active .title {
@@ -129,7 +129,7 @@
   }
 
   .sub {
-    font-size: 12px;
+    font-size: var(--fs-sm);
   }
 
   .dot {
@@ -139,7 +139,7 @@
 
   .time {
     flex: none;
-    font-size: 12px;
+    font-size: var(--fs-sm);
   }
 
   .menu {

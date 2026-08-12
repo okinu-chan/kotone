@@ -12,14 +12,30 @@
   --text: #eef1f6;
   --text-muted: #9aa4b4;
   --text-dim: #6b7480;
-  --accent: #f0a72a;
-  --accent-dim: #8a6118;
+  /* アクセントはスカイブルー。暗い背景では明るめの色で輝度差を確保する */
+  --accent: #38bdf8;
+  --accent-dim: #1c5a78;
+  /* アクセント上に載せる文字色（十分なコントラストが取れる暗色） */
+  --on-accent: #06202c;
+  /* 光彩（グロー）に使う色 */
+  --accent-glow: rgb(56 189 248 / 0.55);
   --danger: #e05252;
   --radius: 10px;
   --radius-lg: 16px;
   --tap: 44px;
   --tabbar-height: 60px;
   --miniplayer-height: 62px;
+
+  /* 文字サイズの倍率。設定「文字の大きさ」で 0.9 / 1 / 1.15 に切り替わる。
+     個々の文字サイズはこの倍率を掛けた変数を使うので、階層関係を保ったまま
+     全体が拡大縮小する。 */
+  --font-scale: 1;
+  --fs-xs: calc(11.5px * var(--font-scale));
+  --fs-sm: calc(12.5px * var(--font-scale));
+  --fs-md: calc(13.5px * var(--font-scale));
+  --fs-lg: calc(15px * var(--font-scale));
+  --fs-xl: calc(17px * var(--font-scale));
+  --fs-title: calc(22px * var(--font-scale));
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-top: env(safe-area-inset-top, 0px);
 
@@ -40,8 +56,11 @@
   --text: #14181f;
   --text-muted: #5a6472;
   --text-dim: #8a94a2;
-  --accent: #c07b09;
-  --accent-dim: #e6c48a;
+  /* 白背景では明るい水色だとコントラストが足りないため、濃いブルーにする */
+  --accent: #0284c7;
+  --accent-dim: #9ad0ea;
+  --on-accent: #ffffff;
+  --accent-glow: rgb(2 132 199 / 0.35);
   color-scheme: light;
 }
 
@@ -61,7 +80,7 @@ body {
 }
 
 body {
-  font-size: 15px;
+  font-size: var(--fs-lg);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }

@@ -98,7 +98,7 @@
   .info {
     position: relative;
     margin: 0;
-    font-size: 11.5px;
+    font-size: var(--fs-xs);
     color: var(--text-dim);
   }
 

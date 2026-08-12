@@ -25,11 +25,13 @@
 {/if}
 
 <style>
+  /* アートワークを枠いっぱいに見せるため、余白を詰めて 1 枚あたりを大きくする。
+     非正方形はトリミングせず letterbox のままなので、比率は保たれる。 */
   .grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-    gap: 16px 12px;
-    padding: 16px 12px;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 14px 8px;
+    padding: 10px 8px;
   }
 
   .card {
@@ -45,12 +47,12 @@
   }
 
   .name {
-    font-size: 13.5px;
+    font-size: var(--fs-md);
     line-height: 1.35;
   }
 
   .artist {
-    font-size: 12px;
+    font-size: var(--fs-sm);
   }
 
   .dot {
@@ -58,16 +60,19 @@
     opacity: 0.6;
   }
 
-  @media (max-width: 420px) {
+  @media (max-width: 460px) {
     .grid {
       grid-template-columns: repeat(2, 1fr);
+      gap: 12px 6px;
+      padding: 8px 6px;
     }
   }
 
   @media (min-width: 1100px) {
     .grid {
-      grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-      padding: 20px;
+      grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+      gap: 18px 10px;
+      padding: 12px 10px;
     }
   }
 </style>

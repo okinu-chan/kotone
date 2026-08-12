@@ -130,7 +130,7 @@
 
   h3 {
     margin: 0 0 10px;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     letter-spacing: 0.06em;
     color: var(--text-dim);
   }
@@ -152,7 +152,7 @@
     border: 1px solid var(--border);
     background: var(--surface);
     color: var(--text-muted);
-    font-size: 13.5px;
+    font-size: var(--fs-md);
   }
 
   .chips button:hover {
@@ -163,20 +163,20 @@
   .chips button.selected {
     background: var(--accent);
     border-color: var(--accent);
-    color: #0d0f13;
+    color: var(--on-accent);
   }
 
   .chips button.selected .count {
-    color: color-mix(in srgb, #0d0f13 70%, transparent);
+    color: color-mix(in srgb, var(--on-accent) 70%, transparent);
   }
 
   .count {
-    font-size: 11.5px;
+    font-size: var(--fs-xs);
   }
 
   .empty {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--fs-md);
   }
 
   .loading {
@@ -190,12 +190,12 @@
     min-height: var(--tap);
     padding: 0 18px;
     border-radius: var(--radius);
-    font-size: 14px;
+    font-size: var(--fs-lg);
   }
 
   .primary {
     background: var(--accent);
-    color: #0d0f13;
+    color: var(--on-accent);
   }
 
   .ghost {

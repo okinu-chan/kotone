@@ -32,7 +32,7 @@
     background: var(--bg-elevated);
     border: 1px solid var(--border);
     box-shadow: 0 8px 28px rgb(0 0 0 / 0.4);
-    font-size: 13.5px;
+    font-size: var(--fs-md);
     line-height: 1.45;
   }
 

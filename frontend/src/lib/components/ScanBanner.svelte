@@ -50,13 +50,13 @@
   }
 
   .phase {
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     min-width: 0;
   }
 
   .counts {
     flex: none;
-    font-size: 11.5px;
+    font-size: var(--fs-xs);
   }
 
   .bar {

@@ -134,6 +134,12 @@ SETTING_SPECS: tuple[SettingSpec, ...] = (
     SettingSpec(
         "theme", "dark", "テーマ", "enum", "画面の配色。", choices=("dark", "light"),
     ),
+    SettingSpec(
+        "font_size", "normal", "文字の大きさ", "enum",
+        "画面全体の文字サイズ。曲名・アーティスト名などの大小関係は保ったまま拡大縮小します。"
+        "「小」は大画面で一覧性を上げたいとき、「大」は読みやすさを優先したいときに。",
+        choices=("small", "normal", "large"),
+    ),
 )
 
 _SPECS_BY_KEY = {spec.key: spec for spec in SETTING_SPECS}

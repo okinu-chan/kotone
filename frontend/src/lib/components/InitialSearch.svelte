@@ -123,13 +123,13 @@
     border: 1px solid var(--border);
     background: var(--surface);
     color: var(--text-muted);
-    font-size: 14px;
+    font-size: var(--fs-lg);
   }
 
   .tabs button.active {
     background: var(--accent);
     border-color: var(--accent);
-    color: #0d0f13;
+    color: var(--on-accent);
   }
 
   .close {
@@ -183,7 +183,7 @@
   }
 
   .ch {
-    font-size: 20px;
+    font-size: calc(var(--fs-xl) * 1.18);
     line-height: 1;
   }
 
@@ -193,7 +193,7 @@
 
   footer {
     margin-top: 14px;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     text-align: center;
   }
 

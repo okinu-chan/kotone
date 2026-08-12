@@ -75,11 +75,11 @@
   }
 
   .name {
-    font-size: 15px;
+    font-size: var(--fs-lg);
   }
 
   .sub {
-    font-size: 12px;
+    font-size: var(--fs-sm);
   }
 
   .dot {
@@ -89,7 +89,7 @@
 
   .count {
     flex: none;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     min-width: 2.2em;
     text-align: right;
   }

@@ -171,13 +171,13 @@
     border-radius: 50%;
     background: var(--surface);
     border: 1px solid var(--border);
-    font-size: 15px;
+    font-size: var(--fs-lg);
   }
 
   .icon-btn.active {
     background: var(--accent);
     border-color: var(--accent);
-    color: #0d0f13;
+    color: var(--on-accent);
   }
 
   .loading {
@@ -201,12 +201,12 @@
     min-height: var(--tap);
     padding: 0 20px;
     border-radius: 999px;
-    font-size: 14px;
+    font-size: var(--fs-lg);
   }
 
   .primary {
     background: var(--accent);
-    color: #0d0f13;
+    color: var(--on-accent);
   }
 
   .primary:disabled {
@@ -253,11 +253,11 @@
   }
 
   .title {
-    font-size: 15px;
+    font-size: var(--fs-lg);
   }
 
   .sub {
-    font-size: 12px;
+    font-size: var(--fs-sm);
   }
 
   .row-actions {
@@ -273,7 +273,7 @@
     height: var(--tap);
     border-radius: 50%;
     color: var(--text-dim);
-    font-size: 12px;
+    font-size: var(--fs-sm);
   }
 
   .row-actions button:hover {
@@ -287,7 +287,7 @@
 
   .hint {
     padding: 14px 16px;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     text-align: center;
   }
 </style>

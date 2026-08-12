@@ -118,8 +118,8 @@
     padding: 0 24px;
     border-radius: 999px;
     background: var(--accent);
-    color: #0d0f13;
-    font-size: 14px;
+    color: var(--on-accent);
+    font-size: var(--fs-lg);
   }
 
   .tabs {
@@ -136,12 +136,12 @@
     border: 1px solid var(--border);
     background: var(--surface);
     color: var(--text-muted);
-    font-size: 13px;
+    font-size: var(--fs-md);
   }
 
   .tabs button.active {
     background: var(--accent);
     border-color: var(--accent);
-    color: #0d0f13;
+    color: var(--on-accent);
   }
 </style>

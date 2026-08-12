@@ -44,7 +44,7 @@
       title: 'ライブラリ',
       keys: ['artist_separators', 'ignore_leading_article', 'scan_on_start'],
     },
-    { title: '表示', keys: ['default_library_sort', 'album_layout', 'theme'] },
+    { title: '表示', keys: ['default_library_sort', 'album_layout', 'theme', 'font_size'] },
   ];
 
   const ENUM_LABELS = {
@@ -59,6 +59,9 @@
     light: 'ライト',
     grid: 'サムネイル',
     list: '1 列',
+    small: '小',
+    normal: '標準',
+    large: '大',
     kotone: 'kotone（画面のスライダー）',
     external: '外部（アンプ側で調整）',
   };
@@ -441,7 +444,7 @@
   }
 
   h2 {
-    font-size: 14px;
+    font-size: var(--fs-lg);
     letter-spacing: 0.04em;
     color: var(--accent);
     margin-bottom: 12px;
@@ -450,7 +453,7 @@
   .stats,
   .note {
     margin: 0 0 12px;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     line-height: 1.6;
   }
 
@@ -469,11 +472,11 @@
     gap: 3px;
     min-width: 0;
     flex: 1;
-    font-size: 14px;
+    font-size: var(--fs-lg);
   }
 
   .label small {
-    font-size: 11.5px;
+    font-size: var(--fs-xs);
     line-height: 1.45;
   }
 
@@ -485,7 +488,7 @@
   .control textarea {
     width: 100%;
     font-family: ui-monospace, 'SF Mono', Consolas, monospace;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     resize: vertical;
   }
 
@@ -545,7 +548,7 @@
 
   .switch input:checked + .slider::after {
     transform: translateX(20px);
-    background: #0d0f13;
+    background: var(--on-accent);
   }
 
   .buttons {
@@ -560,12 +563,12 @@
     min-height: var(--tap);
     padding: 0 20px;
     border-radius: 999px;
-    font-size: 14px;
+    font-size: var(--fs-lg);
   }
 
   .primary {
     background: var(--accent);
-    color: #0d0f13;
+    color: var(--on-accent);
   }
 
   .ghost {
@@ -576,7 +579,7 @@
   .ghost.small {
     min-height: 38px;
     padding: 0 14px;
-    font-size: 13px;
+    font-size: var(--fs-md);
   }
 
   .ghost:disabled {
@@ -599,12 +602,12 @@
 
   .progress p {
     margin: 8px 0 0;
-    font-size: 12px;
+    font-size: var(--fs-sm);
   }
 
   .error {
     color: var(--danger);
-    font-size: 12px;
+    font-size: var(--fs-sm);
   }
 
   .loudness-actions {
@@ -638,7 +641,7 @@
     grid-template-columns: auto 1fr;
     gap: 10px 16px;
     margin: 0 0 16px;
-    font-size: 13.5px;
+    font-size: var(--fs-md);
   }
 
   .estimate dt {
@@ -664,7 +667,7 @@
 
   .warn {
     color: var(--danger);
-    font-size: 13px;
+    font-size: var(--fs-md);
   }
 
   .analyze {
@@ -675,7 +678,7 @@
     width: 100%;
     margin-top: 10px;
     border-collapse: collapse;
-    font-size: 12px;
+    font-size: var(--fs-sm);
   }
 
   .analyze th,
@@ -695,7 +698,7 @@
     grid-template-columns: auto 1fr;
     gap: 8px 16px;
     margin: 0;
-    font-size: 13px;
+    font-size: var(--fs-md);
   }
 
   dt {
@@ -715,7 +718,7 @@
 
   code {
     font-family: ui-monospace, 'SF Mono', Consolas, monospace;
-    font-size: 11.5px;
+    font-size: var(--fs-xs);
   }
 
   a {

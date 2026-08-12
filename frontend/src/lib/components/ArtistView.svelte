@@ -132,7 +132,7 @@
     border-radius: 50%;
     background: var(--surface);
     border: 1px solid var(--border);
-    font-size: 15px;
+    font-size: var(--fs-lg);
   }
 
   .icon-btn:hover {
@@ -158,12 +158,12 @@
     min-height: var(--tap);
     padding: 0 20px;
     border-radius: 999px;
-    font-size: 14px;
+    font-size: var(--fs-lg);
   }
 
   .primary {
     background: var(--accent);
-    color: #0d0f13;
+    color: var(--on-accent);
   }
 
   .ghost {
@@ -196,13 +196,13 @@
     border: 1px solid var(--border);
     background: var(--surface);
     color: var(--text-muted);
-    font-size: 13px;
+    font-size: var(--fs-md);
     white-space: nowrap;
   }
 
   .tabs button.active {
     background: var(--accent);
     border-color: var(--accent);
-    color: #0d0f13;
+    color: var(--on-accent);
   }
 </style>

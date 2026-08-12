@@ -121,7 +121,7 @@
 
   .section {
     padding: 18px 16px 6px;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     letter-spacing: 0.08em;
     color: var(--text-dim);
   }
@@ -139,7 +139,7 @@
     min-height: 56px;
     padding: 6px 16px;
     text-align: left;
-    font-size: 14px;
+    font-size: var(--fs-lg);
   }
 
   .rows button:hover {
@@ -161,6 +161,6 @@
   }
 
   .text .dim {
-    font-size: 12px;
+    font-size: var(--fs-sm);
   }
 </style>

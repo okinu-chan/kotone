@@ -156,8 +156,8 @@
     padding: 0 20px;
     border-radius: var(--radius);
     background: var(--accent);
-    color: #0d0f13;
-    font-size: 14px;
+    color: var(--on-accent);
+    font-size: var(--fs-lg);
   }
 
   .primary:disabled {
@@ -203,11 +203,11 @@
   }
 
   .name {
-    font-size: 15px;
+    font-size: var(--fs-lg);
   }
 
   .meta {
-    font-size: 12px;
+    font-size: var(--fs-sm);
   }
 
   .dot {
