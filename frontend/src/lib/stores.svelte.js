@@ -222,14 +222,46 @@ class LibraryViewState {
   layout = $state('grid');
   initial = $state(null);
   initialGroup = $state(null);
+  /** フォーマット／音質の絞り込み */
+  codec = $state(null);
+  quality = $state(null);
   /** 一覧のスクロール位置（ピクセル） */
   scrollY = $state(0);
   /** 設定から初期値を読み込んだかどうか */
   initialised = $state(false);
 
+  /** 適用中の絞り込み条件（チップ表示用）。 */
+  get activeFilters() {
+    const chips = [];
+    if (this.initial) {
+      chips.push({ key: 'initial', label: `頭文字「${this.initial}」` });
+    }
+    if (this.quality) {
+      const labels = { hires: 'ハイレゾ', cd: 'CD 品質', dsd: 'DSD' };
+      chips.push({ key: 'quality', label: labels[this.quality] ?? this.quality });
+    }
+    if (this.codec) {
+      chips.push({ key: 'codec', label: this.codec.toUpperCase() });
+    }
+    return chips;
+  }
+
+  remove(key) {
+    if (key === 'initial') {
+      this.initial = null;
+      this.initialGroup = null;
+    } else if (key === 'quality') {
+      this.quality = null;
+    } else if (key === 'codec') {
+      this.codec = null;
+    }
+  }
+
   clearFilter() {
     this.initial = null;
     this.initialGroup = null;
+    this.codec = null;
+    this.quality = null;
     this.scrollY = 0;
   }
 }

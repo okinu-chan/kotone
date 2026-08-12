@@ -5,10 +5,10 @@
    */
   import AlbumGrid from './AlbumGrid.svelte';
   import AlbumList from './AlbumList.svelte';
+  import FilterSheet from './FilterSheet.svelte';
   import InitialSearch from './InitialSearch.svelte';
   import PageHeader from './PageHeader.svelte';
   import { api } from '../api.js';
-  import { SORT_LABELS } from '../format.js';
   import { router } from '../router.svelte.js';
   import { libraryView, settings, toast } from '../stores.svelte.js';
 
@@ -25,7 +25,23 @@
   // 画面遷移でコンポーネントが作り直されても、アルバムから戻ったときに
   // 「は行で絞り込んだ状態の、見ていた位置」へ復帰させるため。
   let searchOpen = $state(false);
+  let filterOpen = $state(false);
   let restoredScroll = false;
+
+  const activeFilters = $derived(libraryView.activeFilters);
+
+  function removeFilter(key) {
+    libraryView.remove(key);
+    router.forgetScroll('/library');
+    window.scrollTo(0, 0);
+  }
+
+  /** シートで条件を変えたら、保存済みスクロール位置は捨てて先頭から見せる。 */
+  function onFilterApplied() {
+    settings.set('album_layout', libraryView.layout);
+    router.forgetScroll('/library');
+    window.scrollTo(0, 0);
+  }
 
   let albums = $state([]);
   let artists = $state([]);
@@ -45,17 +61,19 @@
     }
   });
 
-  function setLayout(next) {
-    libraryView.layout = next;
-    settings.set('album_layout', next);
-  }
 
 
   $effect(() => {
     const currentView = libraryView.view;
     const initial = libraryView.initial;
     const initialGroup = libraryView.initialGroup;
-    const params = { sort: libraryView.sort, initial, initial_group: initialGroup };
+    const params = {
+      sort: libraryView.sort,
+      initial,
+      initial_group: initialGroup,
+      codec: libraryView.codec,
+      quality: libraryView.quality,
+    };
     loading = true;
 
     const load = async () => {
@@ -143,40 +161,23 @@
   </div>
 
   {#if libraryView.view === 'albums'}
-    <div class="right-tools">
-      <label class="sort">
-        <span class="dim">並び順</span>
-        <select bind:value={libraryView.sort}>
-          {#each ALBUM_SORTS as key (key)}
-            <option value={key}>{SORT_LABELS[key]}</option>
-          {/each}
-        </select>
-      </label>
-
-      <div class="layout-toggle" role="group" aria-label="表示形式">
-        <button
-          class:active={libraryView.layout === 'grid'}
-          aria-pressed={libraryView.layout === 'grid'}
-          onclick={() => setLayout('grid')}
-          title="サムネイル表示"
-          aria-label="サムネイル表示">▦</button
-        >
-        <button
-          class:active={libraryView.layout === 'list'}
-          aria-pressed={libraryView.layout === 'list'}
-          onclick={() => setLayout('list')}
-          title="1 列表示"
-          aria-label="1 列表示">☰</button
-        >
-      </div>
-    </div>
+    <button class="filter-button" onclick={() => (filterOpen = true)}>
+      絞り込み
+      {#if activeFilters.length > 0}
+        <span class="badge tabular">{activeFilters.length}</span>
+      {/if}
+    </button>
   {/if}
 </div>
 
-{#if libraryView.initial}
-  <div class="filter-chip">
-    <span>頭文字「{libraryView.initial}」で絞り込み中</span>
-    <button onclick={clearInitial}>解除</button>
+{#if activeFilters.length > 0}
+  <div class="filter-chips">
+    {#each activeFilters as chip (chip.key)}
+      <button class="chip" onclick={() => removeFilter(chip.key)}>
+        {chip.label}<span class="remove" aria-hidden="true">✕</span>
+      </button>
+    {/each}
+    <button class="clear" onclick={clearInitial}>すべて解除</button>
   </div>
 {/if}
 
@@ -232,6 +233,7 @@
 {/if}
 
 <InitialSearch {entity} bind:open={searchOpen} onselect={onInitialSelected} />
+<FilterSheet bind:open={filterOpen} sorts={ALBUM_SORTS} onapply={onFilterApplied} />
 
 <style>
   .icon-btn {
@@ -295,70 +297,85 @@
     color: #0d0f13;
   }
 
-  .right-tools {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .layout-toggle {
-    display: flex;
-    gap: 2px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    overflow: hidden;
-  }
-
-  .layout-toggle button {
-    display: grid;
-    place-items: center;
-    min-width: 40px;
-    min-height: 36px;
-    background: var(--surface);
-    color: var(--text-dim);
-    font-size: 15px;
-  }
-
-  .layout-toggle button.active {
-    background: var(--accent);
-    color: #0d0f13;
-  }
-
-  .sort {
-    display: flex;
+  /* 絞り込みは 1 つのボタンに集約する（軸が増えてもツールバーが膨らまない） */
+  .filter-button {
+    display: inline-flex;
     align-items: center;
     gap: 8px;
-    font-size: 12px;
+    flex: none;
+    min-height: 36px;
+    padding: 0 14px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-muted);
+    font-size: 13px;
+    white-space: nowrap;
   }
 
-  .sort select {
-    min-height: 36px;
-    width: auto;
-    padding: 4px 10px;
-    font-size: 13px;
+  .filter-button:hover {
+    background: var(--surface-hover);
+    color: var(--text);
+  }
+
+  .badge {
+    display: grid;
+    place-items: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 999px;
+    background: var(--accent);
+    color: #0d0f13;
+    font-size: 11px;
   }
 
   /* 適用中の絞り込みもツールバーと一緒に固定表示する */
-  .filter-chip {
+  .filter-chips {
     position: sticky;
     top: calc(var(--tap) + var(--safe-top) + 74px);
     z-index: 18;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 12px;
+    gap: 8px;
     padding: 8px 14px;
-    background: color-mix(in srgb, var(--accent) 16%, var(--bg));
+    background: color-mix(in srgb, var(--accent) 14%, var(--bg));
     font-size: 13px;
+    overflow-x: auto;
+    scrollbar-width: none;
   }
 
-  .filter-chip button {
+  .filter-chips::-webkit-scrollbar {
+    display: none;
+  }
+
+  .filter-chips .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
     min-height: 32px;
     padding: 0 12px;
     border-radius: 999px;
     border: 1px solid var(--accent-dim);
+    background: color-mix(in srgb, var(--bg) 60%, transparent);
     color: var(--accent);
+    font-size: 12.5px;
+    white-space: nowrap;
+  }
+
+  .filter-chips .remove {
+    font-size: 10px;
+    opacity: 0.8;
+  }
+
+  .filter-chips .clear {
+    flex: none;
+    min-height: 32px;
+    padding: 0 10px;
+    color: var(--text-muted);
     font-size: 12px;
+    white-space: nowrap;
   }
 
   .loading {
