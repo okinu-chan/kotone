@@ -40,6 +40,9 @@ class Router {
 
   current = $derived(parse(this.path));
 
+  /** パスごとのスクロール位置。画面から離れるときに記録する。 */
+  #scrollPositions = new Map();
+
   constructor() {
     window.addEventListener('popstate', (event) => {
       this.path = window.location.pathname;
@@ -51,6 +54,10 @@ class Router {
 
   navigate(to, { replace = false } = {}) {
     if (to === this.path && !replace) return;
+    // 離れる画面のスクロール位置を控えておく。戻ってきたときに
+    // 「見ていた場所」へ復帰させるため（要件 3.5）。
+    this.#scrollPositions.set(this.path, window.scrollY);
+
     const depth = replace ? this.depth : this.depth + 1;
     if (replace) {
       window.history.replaceState({ depth }, '', to);
@@ -60,6 +67,15 @@ class Router {
     this.path = to;
     this.depth = depth;
     window.scrollTo?.(0, 0);
+  }
+
+  /** 保存しておいたスクロール位置を取り出す（無ければ 0）。 */
+  savedScroll(path) {
+    return this.#scrollPositions.get(path) ?? 0;
+  }
+
+  forgetScroll(path) {
+    this.#scrollPositions.delete(path);
   }
 
   /** タブバーからの遷移。履歴を積み上げずにルートを切り替える。 */

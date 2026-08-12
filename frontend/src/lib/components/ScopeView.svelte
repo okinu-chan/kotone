@@ -31,7 +31,8 @@
         : { year: Number(currentValue) };
 
     Promise.all([
-      api.albums({ ...params, sort: 'year' }),
+      // ジャンル／年で絞った一覧はアルバム名順に並べる（リリース年順だと探しにくい）
+      api.albums({ ...params, sort: 'album' }),
       api.tracks({ ...params, sort: 'album' }),
       currentKind === 'genre' ? api.genres() : Promise.resolve(null),
     ])

@@ -16,6 +16,8 @@
     square = true,
     /** square={false} のときの高さ上限（CSS 長さ）。 */
     maxHeight = '52vh',
+    /** タップ／クリックで拡大表示する場合のハンドラ。 */
+    onzoom = null,
   } = $props();
 
   let failed = $state(false);
@@ -34,13 +36,26 @@
   style={square ? undefined : `--max-art-height: ${maxHeight}`}
 >
   {#if url && !failed}
-    <img
-      src={url}
-      {alt}
-      loading={eager ? 'eager' : 'lazy'}
-      decoding="async"
-      onerror={() => (failed = true)}
-    />
+    {#if onzoom}
+      <!-- タップ／クリックで拡大表示する（マウスでも同じ導線。要件 3.5） -->
+      <button class="zoom" onclick={onzoom} aria-label="アートワークを拡大表示">
+        <img
+          src={url}
+          {alt}
+          loading={eager ? 'eager' : 'lazy'}
+          decoding="async"
+          onerror={() => (failed = true)}
+        />
+      </button>
+    {:else}
+      <img
+        src={url}
+        {alt}
+        loading={eager ? 'eager' : 'lazy'}
+        decoding="async"
+        onerror={() => (failed = true)}
+      />
+    {/if}
   {:else}
     <div class="placeholder" aria-hidden="true">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">
@@ -76,6 +91,12 @@
     display: block;
     min-width: 0;
     min-height: 0;
+  }
+
+  /* 拡大表示ボタンは画像そのものを覆うだけで、見た目は変えない */
+  .zoom {
+    display: contents;
+    cursor: zoom-in;
   }
 
   /* 画像本来の縦横比で表示する（再生中画面用） */

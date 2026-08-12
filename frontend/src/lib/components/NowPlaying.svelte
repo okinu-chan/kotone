@@ -8,6 +8,7 @@
    * 内部に限定。要件 3.5）。
    */
   import AlbumArt from './AlbumArt.svelte';
+  import ArtworkViewer from './ArtworkViewer.svelte';
   import { api } from '../api.js';
   import { formatCodec, formatQuality, formatTime, ORDER_LABELS, REPEAT_LABELS } from '../format.js';
   import { player, toast } from '../stores.svelte.js';
@@ -16,6 +17,8 @@
   const track = $derived(player.track);
   const album = $derived(track ? { id: track.album_id, artwork: track.artwork } : null);
   const progress = $derived(player.duration > 0 ? (player.elapsed / player.duration) * 100 : 0);
+
+  let zoomOpen = $state(false);
 
   const REPEAT_ORDER = ['off', 'range', 'one'];
   const PLAY_ORDER = ['normal', 'shuffle', 'random'];
@@ -94,8 +97,17 @@
     role="img"
     aria-label={track ? `${track.title} のアルバムアート` : 'アルバムアート'}
   >
-    <AlbumArt {album} tier="large" alt="" square={false} eager />
+    <AlbumArt
+      {album}
+      tier="large"
+      alt=""
+      square={false}
+      eager
+      onzoom={() => (zoomOpen = true)}
+    />
   </div>
+
+  <ArtworkViewer bind:open={zoomOpen} {album} alt={track ? `${track.title} のアートワーク` : ''} />
 
   <div class="meta">
     <h1 class="title clamp-2">{track?.title ?? '再生していません'}</h1>

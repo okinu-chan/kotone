@@ -10,7 +10,7 @@
   import { api } from '../api.js';
   import { SORT_LABELS } from '../format.js';
   import { router } from '../router.svelte.js';
-  import { settings, toast } from '../stores.svelte.js';
+  import { libraryView, settings, toast } from '../stores.svelte.js';
 
   const VIEWS = [
     { key: 'albums', label: 'アルバム' },
@@ -21,11 +21,11 @@
 
   const ALBUM_SORTS = ['artist', 'album', 'year', 'genre', 'added'];
 
-  let view = $state('albums');
-  let sort = $state('artist');
-  let initial = $state(null);
-  let initialGroup = $state(null);
+  // 絞り込み・並び順・スクロール位置は共有ストア（libraryView）に置く。
+  // 画面遷移でコンポーネントが作り直されても、アルバムから戻ったときに
+  // 「は行で絞り込んだ状態の、見ていた位置」へ復帰させるため。
   let searchOpen = $state(false);
+  let restoredScroll = false;
 
   let albums = $state([]);
   let artists = $state([]);
@@ -34,29 +34,28 @@
   let loading = $state(false);
   let total = $state(0);
 
-  /** 'grid'（サムネイル）か 'list'（1 列） */
-  let layout = $state('grid');
-
-  let sortInitialised = false;
   $effect(() => {
-    if (sortInitialised || !settings.loaded) return;
-    sortInitialised = true;
+    if (libraryView.initialised || !settings.loaded) return;
+    libraryView.initialised = true;
     if (ALBUM_SORTS.includes(settings.values.default_library_sort)) {
-      sort = settings.values.default_library_sort;
+      libraryView.sort = settings.values.default_library_sort;
     }
     if (['grid', 'list'].includes(settings.values.album_layout)) {
-      layout = settings.values.album_layout;
+      libraryView.layout = settings.values.album_layout;
     }
   });
 
   function setLayout(next) {
-    layout = next;
+    libraryView.layout = next;
     settings.set('album_layout', next);
   }
 
+
   $effect(() => {
-    const currentView = view;
-    const params = { sort, initial, initial_group: initialGroup };
+    const currentView = libraryView.view;
+    const initial = libraryView.initial;
+    const initialGroup = libraryView.initialGroup;
+    const params = { sort: libraryView.sort, initial, initial_group: initialGroup };
     loading = true;
 
     const load = async () => {
@@ -83,26 +82,40 @@
       .catch((error) => toast.error(error.detail || String(error)))
       .finally(() => {
         loading = false;
+        // 一覧が描画されてからスクロール位置を戻す。
+        // 戻ってきた直後は中身が空で高さが足りないため、描画後まで待つ必要がある。
+        const saved = router.savedScroll('/library');
+        if (!restoredScroll && saved > 0) {
+          restoredScroll = true;
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => window.scrollTo(0, saved));
+          });
+        }
       });
   });
 
   function switchView(key) {
-    view = key;
-    clearInitial();
+    libraryView.view = key;
+    libraryView.clearFilter();
+    router.forgetScroll('/library');
+    window.scrollTo(0, 0);
   }
 
   function clearInitial() {
-    initial = null;
-    initialGroup = null;
+    libraryView.clearFilter();
+    router.forgetScroll('/library');
+    window.scrollTo(0, 0);
   }
 
   function onInitialSelected(event) {
-    initial = event.initial;
-    initialGroup = event.group;
+    libraryView.initial = event.initial;
+    libraryView.initialGroup = event.group;
+    router.forgetScroll('/library');
+    window.scrollTo(0, 0);
   }
 
-  const canUseInitialSearch = $derived(['albums', 'artists'].includes(view));
-  const entity = $derived(view === 'artists' ? 'artists' : 'albums');
+  const canUseInitialSearch = $derived(['albums', 'artists'].includes(libraryView.view));
+  const entity = $derived(libraryView.view === 'artists' ? 'artists' : 'albums');
 </script>
 
 <PageHeader title="ライブラリ" subtitle={total ? `${total} 件` : ''}>
@@ -120,8 +133,8 @@
     {#each VIEWS as item (item.key)}
       <button
         role="tab"
-        aria-selected={view === item.key}
-        class:active={view === item.key}
+        aria-selected={libraryView.view === item.key}
+        class:active={libraryView.view === item.key}
         onclick={() => switchView(item.key)}
       >
         {item.label}
@@ -129,11 +142,11 @@
     {/each}
   </div>
 
-  {#if view === 'albums'}
+  {#if libraryView.view === 'albums'}
     <div class="right-tools">
       <label class="sort">
         <span class="dim">並び順</span>
-        <select bind:value={sort}>
+        <select bind:value={libraryView.sort}>
           {#each ALBUM_SORTS as key (key)}
             <option value={key}>{SORT_LABELS[key]}</option>
           {/each}
@@ -142,15 +155,15 @@
 
       <div class="layout-toggle" role="group" aria-label="表示形式">
         <button
-          class:active={layout === 'grid'}
-          aria-pressed={layout === 'grid'}
+          class:active={libraryView.layout === 'grid'}
+          aria-pressed={libraryView.layout === 'grid'}
           onclick={() => setLayout('grid')}
           title="サムネイル表示"
           aria-label="サムネイル表示">▦</button
         >
         <button
-          class:active={layout === 'list'}
-          aria-pressed={layout === 'list'}
+          class:active={libraryView.layout === 'list'}
+          aria-pressed={libraryView.layout === 'list'}
           onclick={() => setLayout('list')}
           title="1 列表示"
           aria-label="1 列表示">☰</button
@@ -160,22 +173,22 @@
   {/if}
 </div>
 
-{#if initial}
+{#if libraryView.initial}
   <div class="filter-chip">
-    <span>頭文字「{initial}」で絞り込み中</span>
+    <span>頭文字「{libraryView.initial}」で絞り込み中</span>
     <button onclick={clearInitial}>解除</button>
   </div>
 {/if}
 
 {#if loading}
   <div class="loading"><div class="spinner"></div></div>
-{:else if view === 'albums'}
-  {#if layout === 'list'}
-    <AlbumList {albums} showYear={sort !== 'added'} />
+{:else if libraryView.view === 'albums'}
+  {#if libraryView.layout === 'list'}
+    <AlbumList {albums} showYear={libraryView.sort !== 'added'} />
   {:else}
-    <AlbumGrid {albums} showYear={sort !== 'added'} />
+    <AlbumGrid {albums} showYear={libraryView.sort !== 'added'} />
   {/if}
-{:else if view === 'artists'}
+{:else if libraryView.view === 'artists'}
   <ul class="rows">
     {#each artists as artist (artist.id)}
       <li>
@@ -192,7 +205,7 @@
     {/each}
   </ul>
   {#if artists.length === 0}<p class="empty-state">アーティストがいません。</p>{/if}
-{:else if view === 'genres'}
+{:else if libraryView.view === 'genres'}
   <ul class="rows">
     {#each genres as genre (genre.id)}
       <li>

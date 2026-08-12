@@ -2,6 +2,8 @@
   /** アルバム詳細。曲を選ぶとその曲から再生する（要件 3.4）。 */
   import AddToPlaylist from './AddToPlaylist.svelte';
   import AlbumArt from './AlbumArt.svelte';
+  import AlbumEditor from './AlbumEditor.svelte';
+  import ArtworkViewer from './ArtworkViewer.svelte';
   import PageHeader from './PageHeader.svelte';
   import TagEditor from './TagEditor.svelte';
   import TrackList from './TrackList.svelte';
@@ -17,6 +19,8 @@
   let addOpen = $state(false);
   let editorOpen = $state(false);
   let editingTrack = $state(null);
+  let albumEditorOpen = $state(false);
+  let zoomOpen = $state(false);
 
   $effect(() => {
     const albumId = id;
@@ -83,13 +87,25 @@
   const discCount = $derived(discs.length);
 </script>
 
-<PageHeader title={album?.name ?? 'アルバム'} subtitle={album?.album_artist ?? ''} />
+<PageHeader title={album?.name ?? 'アルバム'} subtitle={album?.album_artist ?? ''}>
+  {#snippet actions()}
+    {#if album}
+      <button
+        class="icon-btn"
+        onclick={() => (albumEditorOpen = true)}
+        aria-label="アルバム情報を編集">✎</button
+      >
+    {/if}
+  {/snippet}
+</PageHeader>
 
 {#if loading}
   <div class="loading"><div class="spinner"></div></div>
 {:else if album}
   <div class="hero">
-    <div class="cover"><AlbumArt {album} tier="medium" alt="" eager /></div>
+    <div class="cover">
+      <AlbumArt {album} tier="medium" alt="" eager onzoom={() => (zoomOpen = true)} />
+    </div>
     <div class="info">
       <h2 class="clamp-2">{album.name}</h2>
       <div class="chips">
@@ -133,11 +149,33 @@
 
   <AddToPlaylist bind:open={addOpen} albumId={album.id} />
   <TagEditor bind:open={editorOpen} track={editingTrack} onsaved={onTrackSaved} />
+  <AlbumEditor
+    bind:open={albumEditorOpen}
+    {album}
+    onsaved={(updated) => (album = { ...album, ...updated })}
+  />
+  <ArtworkViewer bind:open={zoomOpen} {album} alt={`${album.name} のアートワーク`} />
 {:else}
   <p class="empty-state">アルバムが見つかりません。</p>
 {/if}
 
 <style>
+  .icon-btn {
+    display: grid;
+    place-items: center;
+    width: var(--tap);
+    height: var(--tap);
+    border-radius: 50%;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    font-size: 15px;
+  }
+
+  .icon-btn:hover {
+    background: var(--surface-hover);
+    border-color: var(--accent-dim);
+  }
+
   .loading {
     display: grid;
     place-items: center;

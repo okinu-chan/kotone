@@ -206,3 +206,32 @@ class ToastStore {
 }
 
 export const toast = new ToastStore();
+
+/* ------------------------------------------------- ライブラリ画面の表示状態 */
+
+/**
+ * ライブラリ画面の絞り込み・並び順・スクロール位置。
+ *
+ * コンポーネントは画面遷移のたびに作り直されるため、状態をここに置いて
+ * 保持する。アルバムを開いて戻ったときに「は行で絞り込んだ状態の、
+ * 見ていた位置」へ戻るようにするのが目的。
+ */
+class LibraryViewState {
+  view = $state('albums');
+  sort = $state('album');
+  layout = $state('grid');
+  initial = $state(null);
+  initialGroup = $state(null);
+  /** 一覧のスクロール位置（ピクセル） */
+  scrollY = $state(0);
+  /** 設定から初期値を読み込んだかどうか */
+  initialised = $state(false);
+
+  clearFilter() {
+    this.initial = null;
+    this.initialGroup = null;
+    this.scrollY = 0;
+  }
+}
+
+export const libraryView = new LibraryViewState();
