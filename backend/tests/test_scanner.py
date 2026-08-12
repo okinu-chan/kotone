@@ -276,6 +276,87 @@ def test_multi_artist_album_marked_as_compilation(
     assert row["is_compilation"] == 1
 
 
+def test_album_not_split_by_inconsistent_albumartist_tag(
+    library: Config, db: Database, settings: SettingsStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """同じフォルダ内で ALBUMARTIST の有無が混在してもアルバムは分裂しない。
+
+    実ライブラリで 25 ディレクトリが 2 つに割れていた不具合の回帰テスト。
+    """
+    for index in range(1, 5):
+        path = library.music_dir / f"Mixed/サントラ/{index:02d}.flac"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"\x00" * 128)
+
+    def fake_read_tags(p: Path) -> TrackTags | None:
+        if "Mixed" not in p.parts:
+            return None
+        number = int(p.stem)
+        tags = TrackTags(path=p, title=f"曲{number}", album="サウンドトラック")
+        tags.artists = ["作曲家A"]
+        # 前半の曲だけ ALBUMARTIST を持つ（実データで見られた状態）
+        tags.album_artists = ["作曲家A"] if number <= 2 else []
+        tags.duration = 100.0
+        return tags
+
+    monkeypatch.setattr(scanner_module, "read_tags", fake_read_tags)
+    settings.set("rsgain_enabled", False)
+    LibraryScanner(db, library, settings).scan()
+
+    albums = db.query("SELECT id, name, album_key FROM albums WHERE name = ?",
+                      ("サウンドトラック",))
+    assert len(albums) == 1, f"アルバムが分裂しています: {albums}"
+    assert db.scalar(
+        "SELECT COUNT(*) FROM tracks WHERE album_id = ?", (albums[0]["id"],)
+    ) == 4
+    # ALBUMARTIST を持つ曲の情報でアルバムアーティストが埋まる
+    row = db.query_one(
+        "SELECT a.name FROM albums al JOIN artists a ON a.id = al.album_artist_id "
+        "WHERE al.id = ?",
+        (albums[0]["id"],),
+    )
+    assert row is not None and row["name"] == "作曲家A"
+
+
+def test_multi_disc_album_stays_single(
+    library: Config, db: Database, settings: SettingsStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DISCNUMBER が違ってもアルバムは 1 つにまとまり、ディスク番号は保持される。"""
+    for disc in (1, 2):
+        for track in (1, 2):
+            path = library.music_dir / f"MultiDisc/2枚組/d{disc}t{track}.flac"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"\x00" * 128)
+
+    def fake_read_tags(p: Path) -> TrackTags | None:
+        if "MultiDisc" not in p.parts:
+            return None
+        disc = int(p.stem[1])
+        track = int(p.stem[3])
+        tags = TrackTags(path=p, title=f"D{disc}-{track}", album="2枚組アルバム")
+        tags.artists = ["歌手"]
+        tags.album_artists = ["歌手"]
+        tags.disc_no = disc
+        tags.track_no = track
+        tags.duration = 100.0
+        return tags
+
+    monkeypatch.setattr(scanner_module, "read_tags", fake_read_tags)
+    settings.set("rsgain_enabled", False)
+    LibraryScanner(db, library, settings).scan()
+
+    albums = db.query("SELECT id FROM albums WHERE name = ?", ("2枚組アルバム",))
+    assert len(albums) == 1
+    discs = [
+        r["disc_no"]
+        for r in db.query(
+            "SELECT DISTINCT disc_no FROM tracks WHERE album_id = ? ORDER BY disc_no",
+            (albums[0]["id"],),
+        )
+    ]
+    assert discs == [1, 2]
+
+
 def test_initials_include_empty_buckets(scan: LibraryScanner, db: Database) -> None:
     scan.scan()
     repo = LibraryRepository(db)

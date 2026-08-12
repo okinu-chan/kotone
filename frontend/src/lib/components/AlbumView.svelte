@@ -63,16 +63,24 @@
     };
   }
 
-  /** ディスクが複数ある場合はディスクごとに区切る。 */
+  /**
+   * ディスクごとに区切る。
+   *
+   * タグからディスク番号が取れる（複数ディスクがある）場合だけ見出しを出す。
+   * 1 枚もののアルバムに「ディスク 1」と出しても情報量が無いため。
+   */
   const discs = $derived.by(() => {
     const tracks = album?.tracks ?? [];
     const numbers = [...new Set(tracks.map((t) => t.disc_no || 1))].sort((a, b) => a - b);
-    if (numbers.length <= 1) return [{ number: null, tracks }];
+    if (numbers.length <= 1) return [{ number: null, total: 1, tracks }];
     return numbers.map((number) => ({
       number,
+      total: numbers.length,
       tracks: tracks.filter((t) => (t.disc_no || 1) === number),
     }));
   });
+
+  const discCount = $derived(discs.length);
 </script>
 
 <PageHeader title={album?.name ?? 'アルバム'} subtitle={album?.album_artist ?? ''} />
@@ -97,7 +105,8 @@
         {/if}
       </div>
       <p class="dim tabular">
-        {album.track_count} 曲{#if album.duration}<span class="sep">·</span>{formatDuration(album.duration)}{/if}
+        {#if discCount > 1}{discCount} 枚組<span class="sep">·</span>{/if}{album.track_count}
+        曲{#if album.duration}<span class="sep">·</span>{formatDuration(album.duration)}{/if}
       </p>
       <div class="actions">
         <button class="primary" onclick={playAll}>再生</button>
@@ -108,7 +117,10 @@
 
   {#each discs as disc (disc.number ?? 'single')}
     {#if disc.number !== null}
-      <h3 class="disc-heading dim">ディスク {disc.number}</h3>
+      <h3 class="disc-heading">
+        <span class="disc-label">ディスク {disc.number}</span>
+        <span class="disc-count dim tabular">{disc.tracks.length} 曲</span>
+      </h3>
     {/if}
     <TrackList
       tracks={disc.tracks}
@@ -221,10 +233,28 @@
   }
 
   .disc-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
     margin: 0;
-    padding: 14px 16px 6px;
+    padding: 16px 16px 6px;
+    border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
     font-size: 12px;
     letter-spacing: 0.06em;
+  }
+
+  .disc-heading:first-of-type {
+    border-top: none;
+  }
+
+  .disc-label {
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  .disc-count {
+    font-size: 11.5px;
   }
 
   @media (min-width: 760px) {

@@ -438,6 +438,33 @@ class LibraryScanner:
         self._genre_ids[name] = genre_id
         return genre_id
 
+    def _fill_album_gaps(
+        self, album_id: int, tags: TrackTags, primary_artist_id: int | None
+    ) -> None:
+        """既存アルバムの空欄を、後続トラックのタグで補う。
+
+        同じアルバムでも曲によってタグの充実度が違うことがある（ALBUMARTIST が
+        一部の曲にしか入っていない等）。先に取り込んだ曲に無かった情報を、
+        後から来た曲が持っていれば埋める。
+        """
+        if tags.year:
+            self.db.execute(
+                "UPDATE albums SET year = COALESCE(year, ?), "
+                "release_date = COALESCE(NULLIF(release_date, ''), ?) WHERE id = ?",
+                (tags.year, tags.date, album_id),
+            )
+        if primary_artist_id is not None:
+            self.db.execute(
+                "UPDATE albums SET album_artist_id = COALESCE(album_artist_id, ?) "
+                "WHERE id = ?",
+                (primary_artist_id, album_id),
+            )
+            self.db.execute(
+                "INSERT OR IGNORE INTO album_artists (album_id, artist_id, position) "
+                "VALUES (?, ?, 0)",
+                (album_id, primary_artist_id),
+            )
+
     def _get_or_create_album(
         self, tags: TrackTags, rel_path: str, album_artist_ids: list[int]
     ) -> int | None:
@@ -445,29 +472,17 @@ class LibraryScanner:
         album_name = tags.album.strip()
         primary_artist_id = album_artist_ids[0] if album_artist_ids else None
 
-        album_artist_name = ""
-        if primary_artist_id is not None:
-            row = self.db.query_one(
-                "SELECT name FROM artists WHERE id = ?", (primary_artist_id,)
-            )
-            album_artist_name = row["name"] if row else ""
-
-        key = _album_key(album_name, album_artist_name, tags.musicbrainz_album_id, directory)
+        key = _album_key(album_name, tags.musicbrainz_album_id, directory)
         cached = self._album_ids.get(key)
         if cached is not None:
+            self._fill_album_gaps(cached, tags, primary_artist_id)
             return cached
 
         row = self.db.query_one("SELECT id FROM albums WHERE album_key = ?", (key,))
         if row is not None:
             album_id = int(row["id"])
             self._album_ids[key] = album_id
-            # 年が後から埋まるケースがあるので補完する
-            if tags.year:
-                self.db.execute(
-                    "UPDATE albums SET year = COALESCE(year, ?), "
-                    "release_date = COALESCE(NULLIF(release_date, ''), ?) WHERE id = ?",
-                    (tags.year, tags.date, album_id),
-                )
+            self._fill_album_gaps(album_id, tags, primary_artist_id)
             return album_id
 
         display_name = album_name or Path(rel_path).parent.name or "不明なアルバム"
@@ -800,18 +815,25 @@ class LibraryScanner:
         self.db.commit()
 
 
-def _album_key(
-    album: str, album_artist: str, mbid: str | None, directory: str
-) -> str:
-    """同名異アルバムを区別しつつ、複数ディスクを 1 アルバムにまとめるキー。"""
+def _album_key(album: str, mbid: str | None, directory: str) -> str:
+    """アルバムを一意に識別するキー。
+
+    **タグの有無で形を変えてはいけない。** 以前は ALBUMARTIST があるときだけ
+    ``aa:名前|アーティスト`` を使っていたが、同じフォルダ内に ALBUMARTIST を
+    持つ曲と持たない曲が混在すると 1 枚のアルバムが 2 つに割れてしまった
+    （実ライブラリで 25 ディレクトリが該当）。
+
+    そこで、曲ごとに変わりうる情報はキーに含めず、
+    「フォルダ + アルバム名」だけで決める。アルバムアーティストは
+    スキャン後に :meth:`LibraryScanner._infer_album_artists` で補完する。
+
+    なお複数ディスクを別フォルダ（CD1/CD2 等）に分けている場合は別アルバムに
+    なる。1 フォルダにまとめるか、DISCNUMBER タグを使う運用を推奨する。
+    """
     if mbid:
         return f"mb:{mbid}"
     album_norm = unicodedata.normalize("NFKC", album).casefold().strip()
-    if album_norm and album_artist:
-        artist_norm = unicodedata.normalize("NFKC", album_artist).casefold().strip()
-        return f"aa:{album_norm}|{artist_norm}"
     if album_norm:
-        # アルバムアーティストが無い場合はディレクトリで区別する
         return f"al:{album_norm}|{directory}"
     return f"dir:{directory}"
 
