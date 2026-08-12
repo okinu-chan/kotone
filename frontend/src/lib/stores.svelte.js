@@ -190,9 +190,14 @@ export function applyTheme(theme) {
  */
 const FONT_SCALES = { small: 0.9, normal: 1, large: 1.15 };
 
+/** rem の基準となるルートの font-size（px）。 */
+const ROOT_FONT_PX = 16;
+
 export function applyFontSize(size) {
   const scale = FONT_SCALES[size] ?? 1;
-  document.documentElement.style.setProperty('--font-scale', String(scale));
+  // 文字サイズは rem で定義してあるので、ルートの font-size を変えるだけで
+  // 全体が一律に拡大縮小する（大小関係はそのまま保たれる）。
+  document.documentElement.style.fontSize = `${ROOT_FONT_PX * scale}px`;
 }
 
 /* ------------------------------------------------------------------ 通知 */

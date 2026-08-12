@@ -26,16 +26,16 @@
   --tabbar-height: 60px;
   --miniplayer-height: 62px;
 
-  /* 文字サイズの倍率。設定「文字の大きさ」で 0.9 / 1 / 1.15 に切り替わる。
-     個々の文字サイズはこの倍率を掛けた変数を使うので、階層関係を保ったまま
-     全体が拡大縮小する。 */
-  --font-scale: 1;
-  --fs-xs: calc(11.5px * var(--font-scale));
-  --fs-sm: calc(12.5px * var(--font-scale));
-  --fs-md: calc(13.5px * var(--font-scale));
-  --fs-lg: calc(15px * var(--font-scale));
-  --fs-xl: calc(17px * var(--font-scale));
-  --fs-title: calc(22px * var(--font-scale));
+  /* 文字サイズは rem（ルートの font-size 基準）で定義する。
+     設定「文字の大きさ」は html の font-size を変えるだけで、
+     すべての文字が階層関係を保ったまま拡大縮小する。
+     基準は 16px で、下の値は 11.5 / 12.5 / 13.5 / 15 / 17 / 22px 相当。 */
+  --fs-xs: 0.719rem;
+  --fs-sm: 0.781rem;
+  --fs-md: 0.844rem;
+  --fs-lg: 0.938rem;
+  --fs-xl: 1.063rem;
+  --fs-title: 1.375rem;
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-top: env(safe-area-inset-top, 0px);
 
