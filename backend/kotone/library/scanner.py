@@ -179,6 +179,68 @@ class LibraryScanner:
             self._set_state(status="idle", phase="", finished_at=True)
         return result
 
+    def calibrate_loudness(self, sample_size: int = 6) -> dict[str, Any]:
+        """短いサンプルを実測して、計測速度（実時間比）を較正する。
+
+        所要時間の見積もりは機器と音源の性質で大きく変わる（Pi 4B の実測で
+        44.1kHz/16bit なら 164x、48kHz/24bit を含むと 85x 程度）。
+        十数時間かかりうる処理を始める前に、数秒の実測で見積もりを実機に合わせる。
+
+        計測結果は保存しない（アルバム単位で揃っていないとアルバムゲインが
+        正しく出せないため）。あくまで速度の測定に徹する。
+        """
+        scanner = LoudnessScanner(
+            enabled=True,
+            concurrency=int(self.settings.get("loudness_concurrency") or 0),
+            true_peak=bool(self.settings.get("loudness_true_peak")),
+        )
+        if not scanner.available:
+            return {"calibrated": False, "reason": "計測に使えるツールがありません"}
+
+        rows = self.db.query(
+            "SELECT path, duration FROM tracks "
+            "WHERE album_id IS NOT NULL AND duration > 30 AND gain_scanned_at IS NULL "
+            "ORDER BY RANDOM() LIMIT ?",
+            (max(1, sample_size),),
+        )
+        if not rows:
+            rows = self.db.query(
+                "SELECT path, duration FROM tracks WHERE duration > 30 "
+                "ORDER BY RANDOM() LIMIT ?",
+                (max(1, sample_size),),
+            )
+        if not rows:
+            return {"calibrated": False, "reason": "計測できる曲がありません"}
+
+        paths = [self.config.music_dir / row["path"] for row in rows]
+        audio_seconds = sum(float(row["duration"] or 0) for row in rows)
+
+        started = time.monotonic()
+        measured = scanner.scan_album(paths)
+        elapsed = time.monotonic() - started
+
+        if not measured.tracks or elapsed <= 0:
+            return {"calibrated": False, "reason": "計測に失敗しました"}
+
+        # 実際に結果が返った曲の長さだけを分母にする
+        done_seconds = sum(
+            float(row["duration"] or 0)
+            for row, path in zip(rows, paths, strict=True)
+            if str(path) in measured.tracks
+        )
+        self.stats.record_loudness_throughput(done_seconds, elapsed)
+        log.info(
+            "ラウドネス計測の較正: %d 曲 / %.1f 秒 → %.1fx",
+            len(measured.tracks), elapsed, done_seconds / elapsed,
+        )
+        return {
+            "calibrated": True,
+            "sample_tracks": len(measured.tracks),
+            "sample_audio_seconds": round(audio_seconds),
+            "elapsed_seconds": round(elapsed, 1),
+            "throughput": round(self.stats.loudness_throughput, 1),
+        }
+
     # =============================================================== 走査
 
     def _walk(self) -> list[tuple[str, Path, os.stat_result]]:
@@ -699,6 +761,12 @@ class LibraryScanner:
             phase = _phase_with_eta("ラウドネスを計測中", started, done, total)
             self._progress(phase, done, total)
             self._set_state(phase=phase, processed=done)
+
+            # 長時間の処理なので、途中で中断されても次回の見積もりが実機に
+            # 即したものになるよう、定期的にスループットを記録しておく
+            elapsed_so_far = time.monotonic() - started
+            if measured_audio_seconds > 0 and elapsed_so_far > 60 and done % 200 < len(tracks):
+                self.stats.record_loudness_throughput(measured_audio_seconds, elapsed_so_far)
 
         elapsed = time.monotonic() - started
         if result.tracks_measured:

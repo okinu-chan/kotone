@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import shutil
 from typing import Any
 
@@ -13,6 +14,7 @@ from kotone.api.deps import Ctx
 from kotone.db import current_version
 from kotone.library.artists import CANDIDATE_SEPARATORS, analyze_separators
 from kotone.library.loudness import LoudnessScanner
+from kotone.library.scanner import LibraryScanner
 from kotone.settings import spec_dicts
 from kotone.stats import estimate_loudness
 
@@ -118,6 +120,24 @@ def loudness_progress(ctx: Ctx, remeasure: bool = False) -> dict[str, Any]:
         "available": scanner.available,
         "state": ctx.scan.state(),
     }
+
+
+@router.post("/scan/loudness/calibrate")
+async def calibrate_loudness(ctx: Ctx, sample_size: int = 6) -> dict[str, Any]:
+    """短いサンプルを実測して所要時間の見積もりを実機に合わせる。
+
+    数秒で終わる。十数時間かかりうる計測を始める前に呼ぶことで、
+    「約 11 時間」と「約 5 時間」のような大きなずれを避けられる。
+    """
+    if ctx.scan.running:
+        raise HTTPException(status_code=409, detail="スキャンの実行中は較正できません")
+
+    scanner = LibraryScanner(
+        db=ctx.db, config=ctx.config, settings=ctx.settings,
+    )
+    result = await asyncio.to_thread(scanner.calibrate_loudness, max(1, min(sample_size, 30)))
+    estimate = estimate_loudness(ctx.db, ctx.stats)
+    return {**result, "estimate": estimate.as_dict()}
 
 
 @router.get("/scan/analyze-artists")

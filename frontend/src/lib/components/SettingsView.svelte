@@ -73,6 +73,7 @@
   let confirmRemeasure = $state(false);
   let confirmEstimate = $state(null);
   let confirmLoading = $state(false);
+  let confirmCalibrating = $state(false);
 
   async function refreshLoudness() {
     try {
@@ -89,7 +90,21 @@
     confirmLoading = true;
     confirmOpen = true;
     try {
-      confirmEstimate = await api.loudnessProgress(remeasure);
+      let estimate = await api.loudnessProgress(remeasure);
+      // 実測値がまだ無ければ、数秒のサンプル計測で見積もりを実機に合わせる。
+      // 機器と音源次第で 2 倍近くずれるため、長時間の処理を始める前に確かめる。
+      if (!estimate.is_calibrated && estimate.available && estimate.remaining > 0) {
+        confirmCalibrating = true;
+        try {
+          await api.calibrateLoudness(6);
+          estimate = await api.loudnessProgress(remeasure);
+        } catch {
+          /* 較正できなくても概算のまま進められる */
+        } finally {
+          confirmCalibrating = false;
+        }
+      }
+      confirmEstimate = estimate;
     } catch (error) {
       toast.error(error.detail || String(error));
       confirmOpen = false;
@@ -355,7 +370,12 @@
 <!-- ラウドネス計測は長時間かかるため、所要時間を示してから実行を確認する -->
 <Modal bind:open={confirmOpen} title="ラウドネスを計測しますか？">
   {#if confirmLoading}
-    <div class="loading"><div class="spinner"></div></div>
+    <div class="loading">
+      <div class="spinner"></div>
+      {#if confirmCalibrating}
+        <p class="dim">この機器での計測速度を測っています…</p>
+      {/if}
+    </div>
   {:else if confirmEstimate}
     <dl class="estimate">
       <dt>対象</dt>
@@ -373,9 +393,11 @@
 
     {#if !confirmEstimate.is_calibrated}
       <p class="note dim">
-        ※ この機器での実測値がまだ無いため、標準的な速度による概算です。
-        一度実行すると実測値で見積もり直します。
+        ※ この機器での実測ができなかったため、標準的な速度による概算です。
+        実際の時間は前後することがあります。
       </p>
+    {:else}
+      <p class="note dim">※ この機器で実測した速度に基づく見積もりです。</p>
     {/if}
 
     <p class="note dim">

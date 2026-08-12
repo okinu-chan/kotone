@@ -123,6 +123,7 @@ export const api = {
   startScan: (full = false) => post('/scan', { full }),
   startLoudnessScan: (remeasure = false) => post('/scan/loudness', { remeasure }),
   loudnessProgress: (remeasure = false) => get('/scan/loudness', { remeasure }),
+  calibrateLoudness: (sampleSize = 6) => post(`/scan/loudness/calibrate?sample_size=${sampleSize}`),
   analyzeArtists: () => get('/scan/analyze-artists'),
 };
 
