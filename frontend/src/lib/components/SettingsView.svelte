@@ -1,8 +1,10 @@
 <script>
   /** 設定画面。バックエンドの設定定義（specs）からフォームを自動生成する。 */
+  import Modal from './Modal.svelte';
   import PageHeader from './PageHeader.svelte';
   import { api } from '../api.js';
   import { formatBytes, formatDuration } from '../format.js';
+  import { formatTime } from '../format.js';
   import { scan, settings, toast } from '../stores.svelte.js';
 
   const GROUPS = [
@@ -66,12 +68,40 @@
   let analyzing = $state(false);
   let loudness = $state(null);
 
+  // 実行前の確認ダイアログ（所要時間を提示してから開始する）
+  let confirmOpen = $state(false);
+  let confirmRemeasure = $state(false);
+  let confirmEstimate = $state(null);
+  let confirmLoading = $state(false);
+
   async function refreshLoudness() {
     try {
       loudness = await api.loudnessProgress();
     } catch {
       /* 起動直後などは無視してよい */
     }
+  }
+
+  /** 所要時間を見積もってから確認ダイアログを開く。 */
+  async function askLoudness(remeasure) {
+    confirmRemeasure = remeasure;
+    confirmEstimate = null;
+    confirmLoading = true;
+    confirmOpen = true;
+    try {
+      confirmEstimate = await api.loudnessProgress(remeasure);
+    } catch (error) {
+      toast.error(error.detail || String(error));
+      confirmOpen = false;
+    } finally {
+      confirmLoading = false;
+    }
+  }
+
+  async function runLoudness() {
+    confirmOpen = false;
+    await scan.startLoudness(confirmRemeasure);
+    refreshLoudness();
   }
 
   $effect(() => {
@@ -173,10 +203,22 @@
       {#if group.loudnessActions}
         <div class="loudness-actions">
           {#if loudness}
-            <p class="stats dim tabular">
-              計測済み {loudness.measured} / {loudness.total} 曲
-              {#if loudness.remaining > 0}（未計測 {loudness.remaining} 曲）{/if}
-            </p>
+            <div class="meter">
+              <div class="bar">
+                <div
+                  class="fill"
+                  style={`width: ${loudness.total ? (loudness.measured / loudness.total) * 100 : 0}%`}
+                ></div>
+              </div>
+              <p class="stats dim tabular">
+                計測済み {loudness.measured} / {loudness.total} 曲
+                {#if loudness.remaining > 0}
+                  · 未計測 {loudness.remaining} 曲（所要 約{loudness.estimated_text}）
+                {:else}
+                  · すべて計測済みです
+                {/if}
+              </p>
+            </div>
           {/if}
           {#if scan.running}
             <p class="dim">スキャン／計測の実行中です。</p>
@@ -184,14 +226,12 @@
             <div class="buttons">
               <button
                 class="primary"
-                onclick={() => scan.startLoudness(false)}
+                onclick={() => askLoudness(false)}
                 disabled={loudness ? loudness.remaining === 0 : false}
               >
                 未計測の曲を計測
               </button>
-              <button class="ghost" onclick={() => scan.startLoudness(true)}>
-                すべて測り直す
-              </button>
+              <button class="ghost" onclick={() => askLoudness(true)}>すべて測り直す</button>
             </div>
           {/if}
         </div>
@@ -311,6 +351,55 @@
     </section>
   {/if}
 </div>
+
+<!-- ラウドネス計測は長時間かかるため、所要時間を示してから実行を確認する -->
+<Modal bind:open={confirmOpen} title="ラウドネスを計測しますか？">
+  {#if confirmLoading}
+    <div class="loading"><div class="spinner"></div></div>
+  {:else if confirmEstimate}
+    <dl class="estimate">
+      <dt>対象</dt>
+      <dd>
+        {confirmEstimate.remaining} 曲
+        {#if confirmRemeasure}<span class="dim">（計測済みも含めて測り直します）</span>{/if}
+      </dd>
+      <dt>音源の長さ</dt>
+      <dd class="tabular">{formatTime(confirmEstimate.remaining_audio_seconds)}</dd>
+      <dt>予想所要時間</dt>
+      <dd class="highlight">約 {confirmEstimate.estimated_text}</dd>
+      <dt>計測方式</dt>
+      <dd>{confirmEstimate.backend}（実時間比 {confirmEstimate.throughput}x）</dd>
+    </dl>
+
+    {#if !confirmEstimate.is_calibrated}
+      <p class="note dim">
+        ※ この機器での実測値がまだ無いため、標準的な速度による概算です。
+        一度実行すると実測値で見積もり直します。
+      </p>
+    {/if}
+
+    <p class="note dim">
+      計測中も再生はできます。<strong>途中で中断しても、計測済みの曲は記録されるので
+      次回は続きから再開します。</strong>
+      夜間などに分けて進めることもできます。
+    </p>
+
+    {#if !confirmEstimate.available}
+      <p class="warn">rsgain も FFmpeg も見つからないため計測できません。</p>
+    {/if}
+  {/if}
+
+  {#snippet footer()}
+    <button class="ghost" onclick={() => (confirmOpen = false)}>キャンセル</button>
+    <button
+      class="primary"
+      onclick={runLoudness}
+      disabled={confirmLoading || !confirmEstimate?.available || confirmEstimate?.remaining === 0}
+    >
+      計測を開始
+    </button>
+  {/snippet}
+</Modal>
 
 <style>
   .page {
@@ -498,6 +587,62 @@
 
   .loudness-actions {
     padding-bottom: 8px;
+  }
+
+  .meter {
+    margin-bottom: 12px;
+  }
+
+  .meter .bar {
+    height: 6px;
+    border-radius: 3px;
+    background: var(--bg-sunken);
+    overflow: hidden;
+  }
+
+  .meter .fill {
+    height: 100%;
+    background: var(--accent);
+    transition: width 0.3s;
+  }
+
+  .meter .stats {
+    margin: 8px 0 0;
+  }
+
+  /* 実行前の確認ダイアログ */
+  .estimate {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 10px 16px;
+    margin: 0 0 16px;
+    font-size: 13.5px;
+  }
+
+  .estimate dt {
+    color: var(--text-dim);
+    white-space: nowrap;
+  }
+
+  .estimate dd {
+    margin: 0;
+  }
+
+  .estimate .highlight {
+    color: var(--accent);
+    font-size: 16px;
+    font-weight: 600;
+  }
+
+  .loading {
+    display: grid;
+    place-items: center;
+    padding: 32px;
+  }
+
+  .warn {
+    color: var(--danger);
+    font-size: 13px;
   }
 
   .analyze {

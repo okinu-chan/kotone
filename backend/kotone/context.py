@@ -19,6 +19,7 @@ from kotone.playback import PlaybackController
 from kotone.playlists import PlaylistService
 from kotone.repository import LibraryRepository
 from kotone.settings import SettingsStore
+from kotone.stats import StatsStore
 from kotone.text import get_reading_generator
 
 log = logging.getLogger(__name__)
@@ -131,6 +132,7 @@ class AppContext:
                 log.info("マイグレーションを %d 件適用しました", len(applied))
 
         self.settings = SettingsStore(self.db)
+        self.stats = StatsStore(self.db)
         self.repo = LibraryRepository(self.db)
         self.playlists = PlaylistService(self.db, self.settings)
         self.editing = EditingService(self.db, self.settings)

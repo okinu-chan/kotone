@@ -30,6 +30,7 @@ from kotone.library.artwork import ArtworkCache, load_source
 from kotone.library.loudness import LoudnessScanner
 from kotone.library.tags import TrackTags, is_audio_file, read_tags
 from kotone.settings import SettingsStore
+from kotone.stats import StatsStore
 from kotone.text import get_reading_generator, make_sort_fields
 
 log = logging.getLogger(__name__)
@@ -74,6 +75,7 @@ class LibraryScanner:
         self.settings = settings
         self._progress = progress or (lambda phase, done, total: None)
         self.artwork_cache = ArtworkCache(config.artwork_cache_dir)
+        self.stats = StatsStore(db)
         self._reader = get_reading_generator()
         self._ignore_article = bool(settings.get("ignore_leading_article"))
         self._separators = list(settings.get("artist_separators") or [])
@@ -100,6 +102,7 @@ class LibraryScanner:
 
             dirty_albums: set[int] = set()
             seen_paths: set[str] = set()
+            tag_started = time.monotonic()
 
             for index, (rel_path, abs_path, stat) in enumerate(files, start=1):
                 seen_paths.add(rel_path)
@@ -115,8 +118,9 @@ class LibraryScanner:
 
                 if index % 50 == 0 or index == total:
                     self.db.commit()
-                    self._progress("タグを読み込み中", index, total)
-                    self._set_state(processed=index)
+                    phase = _phase_with_eta("タグを読み込み中", tag_started, index, total)
+                    self._progress(phase, index, total)
+                    self._set_state(phase=phase, processed=index)
 
             self.db.commit()
 
@@ -536,6 +540,7 @@ class LibraryScanner:
 
         total = len(album_ids)
         self._set_state(phase="アートワークを生成中", processed=0, total=total)
+        art_started = time.monotonic()
 
         for index, album_id in enumerate(album_ids, start=1):
             try:
@@ -546,8 +551,9 @@ class LibraryScanner:
                 result.errors.append(f"artwork album {album_id}: {exc}")
             if index % 10 == 0 or index == total:
                 self.db.commit()
-                self._progress("アートワークを生成中", index, total)
-                self._set_state(processed=index)
+                phase = _phase_with_eta("アートワークを生成中", art_started, index, total)
+                self._progress(phase, index, total)
+                self._set_state(phase=phase, processed=index)
 
     def _sync_album_artwork(self, album_id: int, *, force: bool) -> bool:
         row = self.db.query_one(
@@ -632,16 +638,19 @@ class LibraryScanner:
 
         if remeasure:
             rows = self.db.query(
-                "SELECT id, path, album_id FROM tracks WHERE album_id IS NOT NULL"
+                "SELECT id, path, album_id, duration FROM tracks WHERE album_id IS NOT NULL"
             )
         else:
             rows = self.db.query(
-                "SELECT id, path, album_id FROM tracks "
+                "SELECT id, path, album_id, duration FROM tracks "
                 "WHERE album_id IS NOT NULL AND gain_scanned_at IS NULL"
             )
         if not rows:
             log.info("ラウドネス計測: 未計測の曲はありません")
             return
+
+        # 実測スループット（音源の秒数 / 実時間）の算出に使う
+        measured_audio_seconds = 0.0
 
         by_album: dict[int, list[dict[str, Any]]] = defaultdict(list)
         for row in rows:
@@ -683,11 +692,13 @@ class LibraryScanner:
                     ),
                 )
                 result.tracks_measured += 1
+                measured_audio_seconds += float(track.get("duration") or 0)
 
             done += len(tracks)
             self.db.commit()
-            self._progress(_loudness_phase_label(started, done, total), done, total)
-            self._set_state(processed=done)
+            phase = _phase_with_eta("ラウドネスを計測中", started, done, total)
+            self._progress(phase, done, total)
+            self._set_state(phase=phase, processed=done)
 
         elapsed = time.monotonic() - started
         if result.tracks_measured:
@@ -696,6 +707,8 @@ class LibraryScanner:
                 result.tracks_measured, elapsed,
                 result.tracks_measured / max(elapsed / 60, 0.001),
             )
+            # 次回の所要時間の見積もりに使うため、実測スループットを残す
+            self.stats.record_loudness_throughput(measured_audio_seconds, elapsed)
 
     # ============================================================ 進捗の保存
 
@@ -748,16 +761,22 @@ def _now_text() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _loudness_phase_label(started: float, done: int, total: int) -> str:
-    """残り時間の目安を含む進捗ラベル。"""
+def _phase_with_eta(label: str, started: float, done: int, total: int) -> str:
+    """進捗ラベルに残り時間の目安を添える。
+
+    これまでの平均速度から単純に外挿する。曲数の多いライブラリでは
+    「あとどれくらいか」が分からないと待てないため、全フェーズで出す。
+    """
     elapsed = time.monotonic() - started
-    if done <= 0 or elapsed <= 0:
-        return "ラウドネスを計測中"
+    if done <= 0 or elapsed <= 0 or total <= done:
+        return label
     remaining = (total - done) * (elapsed / done)
-    if remaining >= 3600:
-        eta = f"残り約 {remaining / 3600:.1f} 時間"
-    elif remaining >= 60:
-        eta = f"残り約 {remaining / 60:.0f} 分"
-    else:
-        eta = f"残り約 {remaining:.0f} 秒"
-    return f"ラウドネスを計測中（{eta}）"
+    return f"{label}（{_format_remaining(remaining)}）"
+
+
+def _format_remaining(seconds: float) -> str:
+    if seconds >= 3600:
+        return f"残り約 {seconds / 3600:.1f} 時間"
+    if seconds >= 60:
+        return f"残り約 {seconds / 60:.0f} 分"
+    return f"残り約 {seconds:.0f} 秒"

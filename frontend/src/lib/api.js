@@ -122,7 +122,7 @@ export const api = {
   scanState: () => get('/scan'),
   startScan: (full = false) => post('/scan', { full }),
   startLoudnessScan: (remeasure = false) => post('/scan/loudness', { remeasure }),
-  loudnessProgress: () => get('/scan/loudness'),
+  loudnessProgress: (remeasure = false) => get('/scan/loudness', { remeasure }),
   analyzeArtists: () => get('/scan/analyze-artists'),
 };
 

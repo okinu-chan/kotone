@@ -12,7 +12,9 @@ from kotone import __version__
 from kotone.api.deps import Ctx
 from kotone.db import current_version
 from kotone.library.artists import CANDIDATE_SEPARATORS, analyze_separators
+from kotone.library.loudness import LoudnessScanner
 from kotone.settings import spec_dicts
+from kotone.stats import estimate_loudness
 
 router = APIRouter(tags=["system"])
 
@@ -96,17 +98,24 @@ async def start_loudness_scan(
 
 
 @router.get("/scan/loudness")
-def loudness_progress(ctx: Ctx) -> dict[str, Any]:
-    """計測の進み具合（未計測の残り曲数）。"""
-    total = int(ctx.db.scalar("SELECT COUNT(*) FROM tracks") or 0)
-    measured = int(
-        ctx.db.scalar("SELECT COUNT(*) FROM tracks WHERE gain_scanned_at IS NOT NULL") or 0
+def loudness_progress(ctx: Ctx, remeasure: bool = False) -> dict[str, Any]:
+    """計測の残量と、所要時間の見積もり。
+
+    曲数の多いライブラリでは十数時間かかることがあるため、実行前に
+    「どれくらいかかるか」を提示して確認できるようにしている。
+    見積もりは前回計測時の実測スループットに基づく（初回は既定値による概算）。
+    """
+    estimate = estimate_loudness(ctx.db, ctx.stats, remeasure=remeasure)
+    scanner = LoudnessScanner(
+        enabled=True,
+        concurrency=int(ctx.settings.get("loudness_concurrency") or 0),
+        true_peak=bool(ctx.settings.get("loudness_true_peak")),
     )
     return {
-        "total": total,
-        "measured": measured,
-        "remaining": max(0, total - measured),
+        **estimate.as_dict(),
         "running": ctx.scan.running,
+        "backend": scanner.backend,
+        "available": scanner.available,
         "state": ctx.scan.state(),
     }
 
