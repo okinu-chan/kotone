@@ -15,10 +15,10 @@
 
   function measure() {
     if (!viewport || !inner) return;
-    const overflow = inner.scrollWidth - viewport.clientWidth;
-    overflowing = overflow > 4;
-    // 端まで送ってから戻る距離。文字数に応じて所要時間を決める
-    distance = Math.max(0, overflow);
+    overflowing = inner.scrollWidth - viewport.clientWidth > 4;
+    // 文字列の終端が左端に届くまで送る距離＝文字列の幅そのもの。
+    // 端で折り返さず、送りきったら左揃えへ戻す（逆走させない）。
+    distance = inner.scrollWidth;
   }
 
   $effect(() => {
@@ -29,8 +29,8 @@
     return () => clearTimeout(timer);
   });
 
-  // 1 秒あたり約 40px の速度。往復と両端の待ち時間を含める
-  const duration = $derived(Math.max(6, (distance / 40) * 2 + 4));
+  // 1 秒あたり約 45px の速度で送る。先頭で少し止めるぶんを足す
+  const duration = $derived(Math.max(6, distance / 45 + 2));
 </script>
 
 <svelte:window onresize={measure} />
@@ -89,17 +89,18 @@
     line-height: 1.35;
   }
 
-  /* 端まで送って戻る。両端で少し止まる */
+  /* 左方向へ送りきったら左揃えへ戻す（逆向きには動かさない） */
   .inner.animate {
-    animation: marquee var(--scroll-duration) ease-in-out infinite alternate;
+    animation: marquee var(--scroll-duration) linear infinite;
   }
 
   @keyframes marquee {
+    /* 先頭でしばらく止めて読み始められるようにする */
     0%,
-    15% {
+    12% {
       transform: translateX(0);
     }
-    85%,
+    /* 文字列の終端が左端へ抜けたところで 1 周。次の周で左揃えに戻る */
     100% {
       transform: translateX(var(--scroll-distance));
     }

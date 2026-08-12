@@ -49,11 +49,6 @@
     onapply?.();
   }
 
-  function setLayout(next) {
-    libraryView.layout = next;
-    onapply?.();
-  }
-
   /** コーデックが 1 種類しかないなら選択肢として出さない（意味が無いため） */
   const showCodecs = $derived((formats?.codecs ?? []).length > 1);
 </script>
@@ -71,22 +66,6 @@
           {SORT_LABELS[key] ?? key}
         </button>
       {/each}
-    </div>
-  </section>
-
-  <section>
-    <h3>表示形式</h3>
-    <div class="chips">
-      <button
-        class:selected={libraryView.layout === 'grid'}
-        onclick={() => setLayout('grid')}
-        aria-pressed={libraryView.layout === 'grid'}>▦ サムネイル</button
-      >
-      <button
-        class:selected={libraryView.layout === 'list'}
-        onclick={() => setLayout('list')}
-        aria-pressed={libraryView.layout === 'list'}>☰ 1 列</button
-      >
     </div>
   </section>
 

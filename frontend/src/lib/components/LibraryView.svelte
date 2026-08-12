@@ -38,9 +38,13 @@
 
   /** シートで条件を変えたら、保存済みスクロール位置は捨てて先頭から見せる。 */
   function onFilterApplied() {
-    settings.set('album_layout', libraryView.layout);
     router.forgetScroll('/library');
     window.scrollTo(0, 0);
+  }
+
+  function setLayout(next) {
+    libraryView.layout = next;
+    settings.set('album_layout', next);
   }
 
   let albums = $state([]);
@@ -161,12 +165,32 @@
   </div>
 
   {#if libraryView.view === 'albums'}
-    <button class="filter-button" onclick={() => (filterOpen = true)}>
-      絞り込み
-      {#if activeFilters.length > 0}
-        <span class="badge tabular">{activeFilters.length}</span>
-      {/if}
-    </button>
+    <div class="right-tools">
+      <button class="filter-button" onclick={() => (filterOpen = true)}>
+        絞り込み
+        {#if activeFilters.length > 0}
+          <span class="badge tabular">{activeFilters.length}</span>
+        {/if}
+      </button>
+
+      <!-- 表示形式は使用頻度が高いので、シートに入れず直接切り替えられるようにする -->
+      <div class="layout-toggle" role="group" aria-label="表示形式">
+        <button
+          class:active={libraryView.layout === 'grid'}
+          aria-pressed={libraryView.layout === 'grid'}
+          onclick={() => setLayout('grid')}
+          title="サムネイル表示"
+          aria-label="サムネイル表示">▦</button
+        >
+        <button
+          class:active={libraryView.layout === 'list'}
+          aria-pressed={libraryView.layout === 'list'}
+          onclick={() => setLayout('list')}
+          title="1 列表示"
+          aria-label="1 列表示">☰</button
+        >
+      </div>
+    </div>
   {/if}
 </div>
 
@@ -294,6 +318,36 @@
   .views button.active {
     background: var(--accent);
     border-color: var(--accent);
+    color: #0d0f13;
+  }
+
+  .right-tools {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+  }
+
+  .layout-toggle {
+    display: flex;
+    gap: 2px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+
+  .layout-toggle button {
+    display: grid;
+    place-items: center;
+    min-width: 38px;
+    min-height: 36px;
+    background: var(--surface);
+    color: var(--text-dim);
+    font-size: 15px;
+  }
+
+  .layout-toggle button.active {
+    background: var(--accent);
     color: #0d0f13;
   }
 

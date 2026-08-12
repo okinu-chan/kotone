@@ -10,6 +10,8 @@
     useTrackNumber = false,
     showArtwork = false,
     showArtist = true,
+    /** アルバム名も併記するか。アルバム内の一覧では冗長なので出さない。 */
+    showAlbum = true,
     onplay,
     onmenu,
   } = $props();
@@ -38,9 +40,11 @@
 
         <span class="text">
           <span class="title truncate">{track.title}</span>
-          {#if showArtist && (track.artist || track.album)}
+          {#if showArtist && (track.artist || (showAlbum && track.album))}
             <span class="sub truncate dim">
-              {track.artist}{#if track.artist && track.album}<span class="dot">·</span>{/if}{track.album}
+              {track.artist}{#if showAlbum && track.artist && track.album}<span class="dot"
+                  >·</span
+                >{/if}{#if showAlbum}{track.album}{/if}
             </span>
           {/if}
         </span>

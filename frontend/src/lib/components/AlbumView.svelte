@@ -138,10 +138,13 @@
         <span class="disc-count dim tabular">{disc.tracks.length} 曲</span>
       </h3>
     {/if}
+    <!-- 曲名の下にタグ由来のアーティスト名を出す（アルバム名は冗長なので出さない）。
+         コンピレーションや客演のある盤で、曲ごとの演者が分かるようにするため。 -->
     <TrackList
       tracks={disc.tracks}
       useTrackNumber
-      showArtist={false}
+      showArtist
+      showAlbum={false}
       onplay={playFrom}
       onmenu={openEditor}
     />

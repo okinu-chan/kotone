@@ -20,6 +20,19 @@
   const album = $derived(track ? { id: track.album_id, artwork: track.artwork } : null);
   const progress = $derived(player.duration > 0 ? (player.elapsed / player.duration) * 100 : 0);
 
+  /**
+   * 再生範囲の中で何曲目か（例: 5 / 20）。
+   *
+   * ランダム（重複あり）ではキューを [再生中, 次の1曲] しか持たないため
+   * 「1 / 2」となって意味を成さない。その場合は出さない。
+   */
+  const trackPosition = $derived.by(() => {
+    const { queue_position: index, queue_length: total, order } = player.state;
+    if (order === 'random') return null;
+    if (index === null || index === undefined || !total) return null;
+    return `${index + 1} / ${total}`;
+  });
+
   let zoomOpen = $state(false);
   let fullTitleOpen = $state(false);
 
@@ -168,6 +181,9 @@
     />
     <div class="times tabular dim">
       <span>{formatTime(player.elapsed)}</span>
+      {#if trackPosition}
+        <span class="position">{trackPosition}</span>
+      {/if}
       <span>{formatTime(player.duration)}</span>
     </div>
   </div>
@@ -424,8 +440,15 @@
   .times {
     display: flex;
     justify-content: space-between;
+    align-items: baseline;
     font-size: 12px;
     margin-top: -4px;
+  }
+
+  /* 再生範囲の中での位置（5 / 20）。時間表示の間に置く */
+  .position {
+    color: var(--text-muted);
+    letter-spacing: 0.02em;
   }
 
   .transport {
