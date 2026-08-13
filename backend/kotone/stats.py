@@ -17,11 +17,28 @@ log = logging.getLogger(__name__)
 
 #: ラウドネス計測のスループット（実時間比）。値が大きいほど速い。
 #:
-#: 既定値は Raspberry Pi 4B + FFmpeg(ebur128, peak=sample, 3並列) の実測値。
-#: 実際に計測を走らせるとその結果で更新され、以降は実機に即した見積もりになる。
-DEFAULT_LOUDNESS_THROUGHPUT = 80.0
+#: 既定値は Raspberry Pi 4B・3 並列での実測。実際に計測を走らせると
+#: その結果で更新され、以降は実機に即した見積もりになる。
+#: rsgain は ebur128 の約 1.8 倍速いため、どちらが使われるかで分ける。
+DEFAULT_LOUDNESS_THROUGHPUT = 180.0
+DEFAULT_LOUDNESS_THROUGHPUT_RSGAIN = 335.0
 
 KEY_LOUDNESS_THROUGHPUT = "loudness_throughput"
+
+#: スループットの記録に必要な最小の音源長（秒）。
+#: これを下回るサンプルは起動時間の影響が大きすぎて実力を表さない。
+MIN_THROUGHPUT_SAMPLE_SECONDS = 300.0
+
+
+def default_throughput() -> float:
+    """このマシンで使われるバックエンドに応じた既定スループット。"""
+    from kotone.library.loudness import LoudnessScanner  # noqa: PLC0415  循環 import 回避
+
+    return (
+        DEFAULT_LOUDNESS_THROUGHPUT_RSGAIN
+        if LoudnessScanner().backend.startswith("rsgain")
+        else DEFAULT_LOUDNESS_THROUGHPUT
+    )
 
 
 class StatsStore:
@@ -56,7 +73,7 @@ class StatsStore:
 
     @property
     def loudness_throughput(self) -> float:
-        return self.get_float(KEY_LOUDNESS_THROUGHPUT, DEFAULT_LOUDNESS_THROUGHPUT)
+        return self.get_float(KEY_LOUDNESS_THROUGHPUT, default_throughput())
 
     def record_loudness_throughput(self, audio_seconds: float, elapsed_seconds: float) -> None:
         """計測 1 回分の実績からスループットを更新する。
@@ -65,6 +82,12 @@ class StatsStore:
         これまでの値と混ぜて滑らかにする（指数移動平均）。
         """
         if audio_seconds <= 0 or elapsed_seconds <= 0:
+            return
+        if audio_seconds < MIN_THROUGHPUT_SAMPLE_SECONDS:
+            # 数曲だけの計測ではプロセス起動の時間が支配的になり、実力より
+            # 大幅に遅い値が出る（4 秒の曲 6 曲で 121x、実際は 350x 前後）。
+            # 見積もりを歪めるだけなので採用しない。
+            log.debug("サンプルが短いためスループットを更新しません (%.0f 秒)", audio_seconds)
             return
         observed = audio_seconds / elapsed_seconds
         previous = self.get_float(KEY_LOUDNESS_THROUGHPUT, 0.0)

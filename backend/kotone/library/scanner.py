@@ -215,27 +215,35 @@ class LibraryScanner:
         paths = [self.config.music_dir / row["path"] for row in rows]
         audio_seconds = sum(float(row["duration"] or 0) for row in rows)
 
+        # 本番と同じ並列度で測らないと見積もりがずれる（rsgain は
+        # アルバム単位で並列化するため、1 アルバムだけ測ると 1 コア分の
+        # 速度しか出ない）。サンプルを並列数ぶんの束に分けて流す。
+        groups = [paths[i :: scanner.concurrency] for i in range(scanner.concurrency)]
+        groups = [g for g in groups if g]
+
         started = time.monotonic()
-        measured = scanner.scan_album(paths)
+        results = list(scanner.scan_albums(groups))
         elapsed = time.monotonic() - started
 
-        if not measured.tracks or elapsed <= 0:
+        done = {path: r for result in results for path, r in result.tracks.items()}
+        if not done or elapsed <= 0:
             return {"calibrated": False, "reason": "計測に失敗しました"}
 
         # 実際に結果が返った曲の長さだけを分母にする
         done_seconds = sum(
             float(row["duration"] or 0)
             for row, path in zip(rows, paths, strict=True)
-            if str(path) in measured.tracks
+            if str(path) in done
         )
         self.stats.record_loudness_throughput(done_seconds, elapsed)
         log.info(
-            "ラウドネス計測の較正: %d 曲 / %.1f 秒 → %.1fx",
-            len(measured.tracks), elapsed, done_seconds / elapsed,
+            "ラウドネス計測の較正: %d 曲 / %.1f 秒 → %.1fx (backend=%s)",
+            len(done), elapsed, done_seconds / elapsed, scanner.backend,
         )
         return {
             "calibrated": True,
-            "sample_tracks": len(measured.tracks),
+            "backend": scanner.backend,
+            "sample_tracks": len(done),
             "sample_audio_seconds": round(audio_seconds),
             "elapsed_seconds": round(elapsed, 1),
             "throughput": round(self.stats.loudness_throughput, 1),
@@ -744,9 +752,17 @@ class LibraryScanner:
             total, len(by_album), scanner.backend,
         )
 
-        for tracks in by_album.values():
-            paths = [self.config.music_dir / t["path"] for t in tracks]
-            measured = scanner.scan_album(paths)
+        # アルバム単位でまとめて渡し、並列化はバックエンドの都合に任せる。
+        # 結果は入力順に 1 アルバムずつ返るので、その都度 DB に書ける
+        # （途中で電源が落ちても、そこまでの計測は残る）。
+        grouped = list(by_album.values())
+        paths_per_album = [
+            [self.config.music_dir / t["path"] for t in tracks] for tracks in grouped
+        ]
+
+        for tracks, measured in zip(
+            grouped, scanner.scan_albums(paths_per_album), strict=False
+        ):
             album_gain = measured.album
 
             for track in tracks:

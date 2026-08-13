@@ -10,7 +10,8 @@
 #   --music-dir PATH   音楽ライブラリの場所（既定: /var/lib/kotone/music）
 #   --port PORT        Web UI のポート（既定: 8088）
 #   --prefix PATH      アプリの配置先（既定: /opt/kotone）
-#   --with-rsgain      rsgain を GitHub リリースから導入する（既定は導入しない）
+#   --with-rsgain      apt に rsgain が無い場合、GitHub リリースから導入する
+#   --no-rsgain        rsgain を導入しない（ラウドネス計測は FFmpeg で行う）
 #   --no-mpd-config    mpd.conf を書き換えない
 #   --unattended       確認プロンプトを出さない
 #
@@ -25,6 +26,7 @@ PORT="8088"
 SERVICE_USER="${APP_NAME}"
 REPO_URL="https://github.com/USER/kotone.git"
 WITH_RSGAIN=0
+NO_RSGAIN=0
 CONFIGURE_MPD=1
 UNATTENDED=0
 
@@ -43,9 +45,10 @@ while [[ $# -gt 0 ]]; do
     --prefix)        PREFIX="$2"; shift 2 ;;
     --repo)          REPO_URL="$2"; shift 2 ;;
     --with-rsgain)   WITH_RSGAIN=1; shift ;;
+    --no-rsgain)     NO_RSGAIN=1; shift ;;
     --no-mpd-config) CONFIGURE_MPD=0; shift ;;
     --unattended)    UNATTENDED=1; shift ;;
-    -h|--help)       sed -n '2,20p' "$0" | sed 's/^# \?//'; exit 0 ;;
+    -h|--help)       sed -n '2,17p' "$0" | sed 's/^# \?//'; exit 0 ;;
     *)               die "不明なオプションです: $1" ;;
   esac
 done
@@ -99,27 +102,33 @@ apt-get install -y --no-install-recommends \
   ca-certificates \
   curl
 
-# rsgain は Debian の公式リポジトリに無いため既定では導入しない。
-# 未導入の場合、ラウドネス計測は FFmpeg の ebur128 にフォールバックする。
-if [[ $WITH_RSGAIN -eq 1 ]]; then
-  if command -v rsgain >/dev/null 2>&1; then
-    info "rsgain は既に導入されています"
+# ラウドネス計測は rsgain が FFmpeg の ebur128 より約 1.8 倍速い
+# （Pi 4B 実測: 3 並列で 335x 対 182x。18,000 曲で 4.0 時間対 7.4 時間）。
+# Debian 13 (trixie) 以降は公式リポジトリに入っているので既定で導入する。
+# bookworm には無いため、そちらは --with-rsgain 指定時のみ GitHub から取る。
+if [[ $NO_RSGAIN -eq 1 ]]; then
+  info "rsgain は導入しません。ラウドネス計測は FFmpeg で行います"
+elif command -v rsgain >/dev/null 2>&1; then
+  info "rsgain は既に導入されています"
+elif apt-cache show rsgain >/dev/null 2>&1; then
+  info "rsgain を apt から導入します"
+  apt-get install -y --no-install-recommends rsgain \
+    || warn "rsgain の導入に失敗しました（FFmpeg で代替します）"
+elif [[ $WITH_RSGAIN -eq 1 ]]; then
+  info "rsgain を GitHub リリースから導入します（apt に無いため）"
+  RSGAIN_VERSION="3.6"
+  RSGAIN_DEB="rsgain_${RSGAIN_VERSION}-1_${ARCH}.deb"
+  TMP_DEB="$(mktemp -d)/${RSGAIN_DEB}"
+  if curl -fsSL -o "$TMP_DEB" \
+    "https://github.com/complexlogic/rsgain/releases/download/v${RSGAIN_VERSION}/${RSGAIN_DEB}"; then
+    apt-get install -y "$TMP_DEB" || warn "rsgain の導入に失敗しました（FFmpeg で代替します）"
   else
-    info "rsgain を GitHub リリースから導入します"
-    RSGAIN_VERSION="3.6"
-    RSGAIN_DEB="rsgain_${RSGAIN_VERSION}-1_${ARCH}.deb"
-    TMP_DEB="$(mktemp -d)/${RSGAIN_DEB}"
-    if curl -fsSL -o "$TMP_DEB" \
-      "https://github.com/complexlogic/rsgain/releases/download/v${RSGAIN_VERSION}/${RSGAIN_DEB}"; then
-      apt-get install -y "$TMP_DEB" || warn "rsgain の導入に失敗しました（FFmpeg で代替します）"
-    else
-      warn "rsgain の取得に失敗しました（FFmpeg で代替します）"
-    fi
-    rm -rf "$(dirname "$TMP_DEB")"
+    warn "rsgain の取得に失敗しました（FFmpeg で代替します）"
   fi
+  rm -rf "$(dirname "$TMP_DEB")"
 else
-  command -v rsgain >/dev/null 2>&1 \
-    || info "rsgain は導入しません。ラウドネス計測は FFmpeg で行います（--with-rsgain で導入可）"
+  info "rsgain は apt に無いため導入しません（--with-rsgain で GitHub から取得できます）"
+  info "ラウドネス計測は FFmpeg で行います（rsgain より 1.8 倍ほど遅くなります）"
 fi
 
 # ------------------------------------------------------------ ユーザー作成

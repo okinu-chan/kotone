@@ -9,19 +9,20 @@ rsgain が無い環境では FFmpeg の ``ebur128`` フィルタにフォール�
 
 大規模ライブラリ向けの性能について
 ----------------------------------
-Raspberry Pi 4B (Cortex-A72 4コア) での実測値（3分の FLAC 1 曲あたり）:
+Raspberry Pi 4B (Cortex-A72 4コア) + 実ライブラリ 8 アルバム (432 分) での実測:
 
-===================  ==========  ==============
-方式                   所要時間    実時間比
-===================  ==========  ==============
-loudnorm (旧実装)        20.0 秒      9.1x
-**ebur128 (現実装)**    **4.0 秒**  **45.8x**
-デコードのみ（上限）        1.1 秒     171.3x
-===================  ==========  ==============
+=========================  ============  ==================
+方式                         実時間比       18,000 曲の所要
+=========================  ============  ==================
+loudnorm (初期実装)             9.1x         非現実的
+ebur128 3 並列                182x          7.4 時間
+**rsgain 3 並列 (現行)**      **335x**      **4.0 時間**
+=========================  ============  ==================
 
-``loudnorm`` は正規化用フィルタで計測以上の処理を行うため遅い。計測目的には
-``ebur128`` で十分かつ 5 倍速い。さらにコア数ぶん並列化するため、18,000 曲規模
-でも一晩（6〜7 時間程度）で完了する見込み。
+rsgain は libebur128 を直接叩くためプロセス起動もパイプ経由の出力解析も要らず、
+1 プロセスあたり ebur128 の約 1.8 倍速い。ただし ``custom`` モードは単スレッド
+なので、並列化はアルバム単位で当てる（:meth:`LoudnessScanner.scan_albums`）。
+FFmpeg は 1 プロセスが 1 曲なので、そちらはアルバム内で並列化する。
 
 なお、ファイルに既存の ReplayGain タグがある場合はそもそも計測せずに
 それを使う（:mod:`kotone.library.tags` / :mod:`kotone.library.scanner` 参照）。
@@ -35,7 +36,9 @@ import os
 import re
 import shutil
 import subprocess
-from concurrent.futures import ThreadPoolExecutor
+from collections import deque
+from collections.abc import Iterator, Sequence
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -63,19 +66,19 @@ class AlbumLoudness:
 
 #: 並列数の既定上限。
 #:
-#: Raspberry Pi 4B での実測（3分の FLAC、ebur128 peak=sample）:
+#: Raspberry Pi 4B での実測（rsgain、アルバム単位の並列）:
 #:
 #: ===== ============== ==================
 #: 並列   合計スループット  18,000 曲の所要
 #: ===== ============== ==================
-#: 1       30.9x          34.5 時間
-#: **2**   **49.9x**      **21.4 時間**
-#: 3       51.7x          20.6 時間
-#: 4       51.3x          20.8 時間
+#: 1       194x            7.0 時間
+#: 2       317x            4.3 時間
+#: **3**   **335x**       **4.0 時間**
+#: 4       349x            3.9 時間
 #: ===== ============== ==================
 #:
-#: コア数を増やしてもメモリ帯域で頭打ちになるため、3 を超えて並列化しても
-#: 速くならない。むしろ再生や UI に回すコアを残したほうがよい。
+#: 3 を超えるとメモリ帯域で頭打ちになり、伸びは 4% ほどしかない。
+#: 計測中も再生と UI を滞らせないよう、コアを 1 つ残して 3 を上限にする。
 MAX_AUTO_CONCURRENCY = 3
 
 
@@ -114,7 +117,7 @@ class LoudnessScanner:
         if not self.enabled:
             return "disabled"
         if self._rsgain:
-            return "rsgain"
+            return f"rsgain x{self.concurrency}"
         if self._ffmpeg:
             return f"ffmpeg x{self.concurrency}"
         return "unavailable"
@@ -132,9 +135,57 @@ class LoudnessScanner:
             return self._scan_with_ffmpeg(files)
         return AlbumLoudness(tracks={})
 
+    def scan_albums(
+        self, albums: Sequence[Sequence[Path]]
+    ) -> Iterator[AlbumLoudness]:
+        """複数のアルバムを計測し、入力と同じ順序で結果を返す。
+
+        並列化の当てどころがバックエンドで違う。rsgain は 1 プロセスが
+        1 アルバムを直列に処理するのでアルバム単位で並べ、FFmpeg は
+        1 プロセスが 1 曲なのでアルバム内で並べる。両方に並列を掛けると
+        コアを奪い合って却って遅くなるため、どちらか一方だけにする。
+
+        呼び出し側が結果を 1 つずつ受け取って DB に書けるよう、
+        逐次返す（途中で止めてもそこまでの計測は残る）。
+        """
+        if not self.available:
+            return
+        if not self._rsgain:
+            for files in albums:
+                yield self.scan_album(list(files))
+            return
+
+        # 全アルバムをいちどに投入すると、中断してもキューが走り切って
+        # しまう。並列数の 2 倍だけ先読みして、待ち行列を短く保つ。
+        window = max(2, self.concurrency * 2)
+        pending: deque[Future[AlbumLoudness]] = deque()
+        with ThreadPoolExecutor(max_workers=self.concurrency) as pool:
+            for files in albums:
+                pending.append(pool.submit(self._scan_album_rsgain, list(files)))
+                if len(pending) >= window:
+                    yield pending.popleft().result()
+            while pending:
+                yield pending.popleft().result()
+
     # --- rsgain ---------------------------------------------------------
+    def _scan_album_rsgain(self, files: list[Path]) -> AlbumLoudness:
+        """:meth:`scan_albums` のワーカー。
+
+        フォールバックでもワーカーごとに並列を掛けると、並列数の二乗だけ
+        プロセスが走ってしまう。ここでは 1 曲ずつに抑える。
+        """
+        if not files:
+            return AlbumLoudness(tracks={})
+        result = self._scan_with_rsgain(files)
+        if result.tracks or not self._ffmpeg:
+            return result
+        log.debug("rsgain が結果を返さなかったため FFmpeg にフォールバックします")
+        return self._scan_with_ffmpeg(files, workers=1)
+
     def _scan_with_rsgain(self, files: list[Path]) -> AlbumLoudness:
-        cmd = [self._rsgain, "custom", "-a", "-s", "s", "-O", *[str(f) for f in files]]
+        # -q: 進捗表示を抑える（-O のタブ区切り出力だけを読む）
+        cmd = [self._rsgain, "custom", "-a", "-s", "s", "-O", "-q",
+               *[str(f) for f in files]]
         try:
             proc = subprocess.run(  # noqa: S603
                 cmd,
@@ -158,14 +209,16 @@ class LoudnessScanner:
         return _parse_rsgain_output(proc.stdout, files)
 
     # --- FFmpeg ---------------------------------------------------------
-    def _scan_with_ffmpeg(self, files: list[Path]) -> AlbumLoudness:
+    def _scan_with_ffmpeg(
+        self, files: list[Path], *, workers: int | None = None
+    ) -> AlbumLoudness:
         """アルバム内の各曲を並列に計測する。
 
         1 曲あたり 1 プロセスなので、コア数ぶん同時に走らせると
         ほぼコア数倍のスループットが出る（GIL は subprocess 待ちで解放される）。
         """
         tracks: dict[str, LoudnessResult] = {}
-        workers = min(self.concurrency, len(files))
+        workers = min(workers or self.concurrency, len(files))
         with ThreadPoolExecutor(max_workers=workers) as pool:
             for path, result in zip(
                 files, pool.map(self._measure_with_ffmpeg, files), strict=True
@@ -240,7 +293,17 @@ def parse_ebur128_output(stderr: str) -> LoudnessResult | None:
 
 
 def compute_album_gain(tracks: dict[str, LoudnessResult]) -> LoudnessResult | None:
-    """収録曲のラウドネスからアルバムゲインを求める（エネルギー平均）。"""
+    """収録曲のラウドネスからアルバムゲインを求める（エネルギー平均）。
+
+    これは FFmpeg にフォールバックしたときの**近似**。本来のアルバムゲインは
+    全曲を連結した音源に対してゲーティングを掛けて求めるもので、曲ごとの
+    積分ラウドネスを平均したのでは静かな曲の扱いがずれる。実測では
+    収録曲の音量差が大きいアルバムで最大 1.0 dB の差が出た
+    （トラックゲインの差は 0.05 dB 以内）。
+
+    rsgain は連結相当の正しい値を返すので、そちらが使える場合は
+    この関数を通さず rsgain の ``Album`` 行を採用する。
+    """
     values = [r.loudness_lufs for r in tracks.values() if r.loudness_lufs is not None]
     if not values:
         return None
@@ -269,6 +332,11 @@ def _parse_rsgain_output(stdout: str, files: list[Path]) -> AlbumLoudness:
     """rsgain の ``-O``（タブ区切り）出力を解析する。
 
     列の並びはバージョンによって変わるため、ヘッダー行から列位置を決める。
+
+    rsgain が返すのはディレクトリを含まないファイル名だけなので、名前で
+    引き当てると 2 枚組の ``Disc1/01 ….flac`` と ``Disc2/01 ….flac`` を
+    取り違える。出力は入力順に並ぶため、順序で対応づけたうえで
+    ファイル名が一致することを確かめる。
     """
     lines = [ln for ln in stdout.splitlines() if ln.strip()]
     if not lines:
@@ -279,9 +347,10 @@ def _parse_rsgain_output(stdout: str, files: list[Path]) -> AlbumLoudness:
         log.warning("rsgain の出力形式を解釈できませんでした")
         return AlbumLoudness(tracks={})
 
-    by_name = {Path(f).name: Path(f) for f in files}
     tracks: dict[str, LoudnessResult] = {}
     album: LoudnessResult | None = None
+    #: 入力リストのどこまで対応づけたか
+    cursor = 0
 
     for line in lines[1:]:
         cells = line.split("\t")
@@ -305,9 +374,16 @@ def _parse_rsgain_output(stdout: str, files: list[Path]) -> AlbumLoudness:
         if name.strip().lower() == "album":
             album = result
             continue
-        path = by_name.get(Path(name).name)
-        if path is not None:
-            tracks[str(path)] = result
+
+        # 読めない曲があると rsgain はその行を飛ばすので、一致するまで進める。
+        # 最後まで見つからなければ想定外の行として捨て、位置は戻す。
+        probe = cursor
+        while probe < len(files):
+            if files[probe].name == Path(name).name:
+                tracks[str(files[probe])] = result
+                cursor = probe + 1
+                break
+            probe += 1
 
     return AlbumLoudness(tracks=tracks, album=album)
 

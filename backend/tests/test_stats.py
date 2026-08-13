@@ -6,13 +6,17 @@
 
 from __future__ import annotations
 
+import shutil
+
 import pytest
 
 from kotone.db import Database
 from kotone.stats import (
     DEFAULT_LOUDNESS_THROUGHPUT,
+    DEFAULT_LOUDNESS_THROUGHPUT_RSGAIN,
     KEY_LOUDNESS_THROUGHPUT,
     StatsStore,
+    default_throughput,
     estimate_loudness,
     format_duration_ja,
 )
@@ -39,7 +43,20 @@ def stats(db: Database) -> StatsStore:
 
 
 def test_default_throughput_when_never_measured(stats: StatsStore) -> None:
-    assert stats.loudness_throughput == DEFAULT_LOUDNESS_THROUGHPUT
+    # 既定値は rsgain の有無で変わるので、実行環境に合わせて比べる
+    assert stats.loudness_throughput == default_throughput()
+
+
+def test_default_throughput_matches_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    """rsgain がある環境では、その分だけ速い既定値を使うこと。"""
+    def only(tool: str):
+        return lambda name: f"/usr/bin/{name}" if name == tool else None
+
+    monkeypatch.setattr(shutil, "which", only("rsgain"))
+    assert default_throughput() == DEFAULT_LOUDNESS_THROUGHPUT_RSGAIN
+
+    monkeypatch.setattr(shutil, "which", only("ffmpeg"))
+    assert default_throughput() == DEFAULT_LOUDNESS_THROUGHPUT
 
 
 def test_records_observed_throughput(stats: StatsStore) -> None:
@@ -58,7 +75,18 @@ def test_throughput_is_smoothed_across_runs(stats: StatsStore) -> None:
 def test_invalid_measurements_are_ignored(stats: StatsStore) -> None:
     stats.record_loudness_throughput(0, 60)
     stats.record_loudness_throughput(3600, 0)
-    assert stats.loudness_throughput == DEFAULT_LOUDNESS_THROUGHPUT
+    assert stats.loudness_throughput == default_throughput()
+
+
+def test_tiny_sample_does_not_pollute_estimate(stats: StatsStore) -> None:
+    """数曲だけの計測で見積もりが崩れないこと。
+
+    実機で 4 秒の曲 6 曲を計測したとき、プロセス起動の時間が支配的になって
+    121x と記録され、実力（約 350x）の見積もりが 280x から 184x へ落ちた。
+    """
+    stats.record_loudness_throughput(3600, 12)                  # 300x を記録
+    stats.record_loudness_throughput(24, 0.2)                   # 24 秒 = 短すぎる
+    assert stats.loudness_throughput == pytest.approx(300.0)    # 影響を受けない
 
 
 def test_estimate_counts_only_unmeasured_tracks(db: Database, stats: StatsStore) -> None:
