@@ -8,11 +8,13 @@
    */
   import AddToPlaylist from './AddToPlaylist.svelte';
   import AlbumGrid from './AlbumGrid.svelte';
+  import AlbumLayoutToggle from './AlbumLayoutToggle.svelte';
+  import AlbumList from './AlbumList.svelte';
   import ArtistEditor from './ArtistEditor.svelte';
   import PageHeader from './PageHeader.svelte';
   import TrackList from './TrackList.svelte';
   import { api } from '../api.js';
-  import { player, toast } from '../stores.svelte.js';
+  import { libraryView, player, toast } from '../stores.svelte.js';
   import { router } from '../router.svelte.js';
 
   let { id } = $props();
@@ -88,27 +90,40 @@
     <button class="ghost" onclick={() => (addOpen = true)}>プレイリストへ追加</button>
   </div>
 
-  <div class="tabs" role="tablist">
-    <button
-      role="tab"
-      aria-selected={tab === 'albums'}
-      class:active={tab === 'albums'}
-      onclick={() => (tab = 'albums')}
-    >
-      アルバム（{artist.albums.length}）
-    </button>
-    <button
-      role="tab"
-      aria-selected={tab === 'tracks'}
-      class:active={tab === 'tracks'}
-      onclick={() => (tab = 'tracks')}
-    >
-      All {artist.name}（{artist.tracks.length} 曲）
-    </button>
+  <div class="tabbar">
+    <div class="tabs" role="tablist">
+      <button
+        role="tab"
+        aria-selected={tab === 'albums'}
+        class:active={tab === 'albums'}
+        onclick={() => (tab = 'albums')}
+      >
+        アルバム（{artist.albums.length}）
+      </button>
+      <button
+        role="tab"
+        aria-selected={tab === 'tracks'}
+        class:active={tab === 'tracks'}
+        onclick={() => (tab = 'tracks')}
+      >
+        All {artist.name}（{artist.tracks.length} 曲）
+      </button>
+    </div>
+
+    <!-- アルバム名を読みながら探したいときのために 1 列表示へ切り替えられる。
+         設定はライブラリと共有する（行き来しても見た目が変わらないように）。
+         タブ側は横スクロールするので、切り替えは外に出して右端に固定する -->
+    {#if tab === 'albums'}
+      <AlbumLayoutToggle />
+    {/if}
   </div>
 
   {#if tab === 'albums'}
-    <AlbumGrid albums={artist.albums} />
+    {#if libraryView.layout === 'list'}
+      <AlbumList albums={artist.albums} />
+    {:else}
+      <AlbumGrid albums={artist.albums} />
+    {/if}
   {:else}
     <TrackList tracks={artist.tracks} showArtwork onplay={playTrack} />
   {/if}
@@ -176,11 +191,21 @@
     color: var(--text);
   }
 
+  .tabbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
   .tabs {
     display: flex;
     gap: 6px;
-    padding: 8px 16px;
-    border-bottom: 1px solid var(--border);
+    /* アーティスト名が長いとタブが伸びるので、ここだけ横スクロールさせる。
+       min-width: 0 が無いと flex 子要素が縮まず、右の切り替えを押し出す */
+    flex: 1;
+    min-width: 0;
     overflow-x: auto;
     scrollbar-width: none;
   }

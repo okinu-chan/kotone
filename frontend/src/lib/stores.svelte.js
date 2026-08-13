@@ -156,6 +156,11 @@ class SettingsStore {
       this.loaded = true;
       applyTheme(this.values.theme);
       applyFontSize(this.values.font_size);
+      // 表示形式はライブラリ以外（アーティスト画面など）でも使うため、
+      // ライブラリを開いたかどうかに関係なくここで反映しておく
+      if (['grid', 'list'].includes(this.values.album_layout)) {
+        libraryView.layout = this.values.album_layout;
+      }
     } catch (error) {
       toast.error(error.detail || String(error));
     }

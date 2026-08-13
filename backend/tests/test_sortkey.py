@@ -5,6 +5,8 @@ from __future__ import annotations
 import pytest
 
 from kotone.text.sortkey import (
+    KANA_INITIALS,
+    KANA_ROWS,
     initial_of,
     katakana_to_hiragana,
     make_sort_fields,
@@ -44,10 +46,12 @@ def test_leading_article_option() -> None:
 @pytest.mark.parametrize(
     ("sort_key", "expected"),
     [
+        # カナは行の代表ではなく 1 文字そのものを返す（五十音を並べるため）
         ("あいうえお", ("あ", "kana")),
-        ("きようと", ("か", "kana")),
+        ("きようと", ("き", "kana")),
         ("さくら", ("さ", "kana")),
         ("わたし", ("わ", "kana")),
+        ("ん", ("ん", "kana")),
         ("beatles", ("B", "latin")),
         ("2001", ("#", "latin")),
         ("薔薇", ("#", "latin")),   # 読みが取れず漢字が残った場合
@@ -96,3 +100,29 @@ def test_latin_is_used_as_is() -> None:
     assert sort_key == "radiohead"
     assert group == "latin"
     assert initial == "R"
+
+
+def test_kana_initials_cover_the_gojuon() -> None:
+    """カナタブに並ぶ頭文字が五十音を網羅していること。"""
+    assert KANA_INITIALS[:5] == list("あいうえお")
+    assert KANA_INITIALS[-5:] == list("わゐゑをん")
+    assert len(KANA_INITIALS) == len(set(KANA_INITIALS))
+    # や行は「や・ゆ・よ」の 3 文字（画面側はここに空きを入れて表の形にする）
+    assert "やゆよ" in KANA_ROWS
+
+
+def test_every_kana_initial_is_reachable() -> None:
+    """並べたどの頭文字も、実際にその文字で始まる読みから導けること。
+
+    表に出ていても initial_of が返さない文字があると、押しても 0 件の
+    死んだセルになる。
+    """
+    for ch in KANA_INITIALS:
+        assert initial_of(ch) == (ch, "kana"), ch
+
+
+def test_voiced_kana_share_the_unvoiced_initial() -> None:
+    """濁点・半濁点・小書きは清音の頭文字にまとめる。"""
+    assert initial_of(normalize_for_sort("ギター"))[0] == "き"
+    assert initial_of(normalize_for_sort("パンダ"))[0] == "は"
+    assert initial_of(normalize_for_sort("ヴィレッジ"))[0] == "う"

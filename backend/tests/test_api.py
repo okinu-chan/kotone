@@ -16,6 +16,7 @@ from kotone.db import Database, apply_migrations
 from kotone.library.scanner import LibraryScanner
 from kotone.main import create_app
 from kotone.settings import SettingsStore
+from kotone.text import KANA_INITIALS
 from tests.test_scanner import LIBRARY, library  # noqa: F401 - fixture の再利用
 
 
@@ -76,7 +77,7 @@ def test_artist_detail_is_direct_search_entry_point(client: TestClient) -> None:
 
 def test_initials_endpoint(client: TestClient) -> None:
     payload = client.get("/api/library/initials/artists", params={"group": "kana"}).json()
-    assert [item["initial"] for item in payload["items"]] == list("あかさたなはまやらわ")
+    assert [item["initial"] for item in payload["items"]] == KANA_INITIALS
 
 
 def test_search_matches_name_and_reading(client: TestClient) -> None:

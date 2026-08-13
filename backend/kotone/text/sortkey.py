@@ -46,25 +46,28 @@ for _row in _VOWEL_ROWS.values():
         if _ch != "　":
             _CHAR_TO_VOWEL[_ch] = "あいうえお"[_i]
 
-#: イニシャルサーチの「カナ」タブに並べる行（要件 3.7）
-KANA_ROWS: list[str] = ["あ", "か", "さ", "た", "な", "は", "ま", "や", "ら", "わ"]
+#: 五十音表の行（濁点除去・小書き展開後の文字で構成する）
+#:
+#: 「英数・他」タブが A〜Z を 1 文字ずつ並べるのに合わせ、カナも 1 文字ずつ
+#: 並べる（要件 3.7）。行ごとに分けてあるのは、画面側で五十音表の形に
+#: 並べ直せるようにするため。
+KANA_ROWS: list[str] = [
+    "あいうえお",
+    "かきくけこ",
+    "さしすせそ",
+    "たちつてと",
+    "なにぬねの",
+    "はひふへほ",
+    "まみむめも",
+    "やゆよ",
+    "らりるれろ",
+    "わゐゑをん",
+]
 
-#: 各行に属する文字（濁点除去・小書き展開後の文字で判定する）
-_KANA_ROW_MEMBERS = {
-    "あ": "あいうえお",
-    "か": "かきくけこ",
-    "さ": "さしすせそ",
-    "た": "たちつてと",
-    "な": "なにぬねの",
-    "は": "はひふへほ",
-    "ま": "まみむめも",
-    "や": "やゆよ",
-    "ら": "らりるれろ",
-    "わ": "わゐゑをん",
-}
-_CHAR_TO_ROW: dict[str, str] = {
-    ch: row for row, members in _KANA_ROW_MEMBERS.items() for ch in members
-}
+#: イニシャルサーチの「カナ」タブに並べる頭文字（五十音順）
+KANA_INITIALS: list[str] = [ch for row in KANA_ROWS for ch in row]
+
+_KANA_INITIAL_SET = frozenset(KANA_INITIALS)
 
 #: イニシャルサーチの「英数・他」タブに並べる頭文字
 LATIN_INITIALS: list[str] = [chr(c) for c in range(ord("A"), ord("Z") + 1)] + ["#"]
@@ -154,13 +157,17 @@ def initial_of(sort_key: str) -> tuple[str, str]:
     """ソートキーから ``(頭文字, グループ)`` を求める。
 
     グループは ``"kana"``（カナタブ）または ``"latin"``（英数・他タブ）。
+
+    カナは行の代表（あ・か・さ…）ではなく 1 文字そのものを返す。
+    ソートキーは濁点除去・小書き展開済みなので、「ギ」も「き」になる。
+    ここが変わると保存済みの ``initial`` 列と食い違うため、値の詰め替えは
+    マイグレーション 0003 で行っている。
     """
     for ch in sort_key:
         if ch.isspace():
             continue
-        row = _CHAR_TO_ROW.get(ch)
-        if row:
-            return row, "kana"
+        if ch in _KANA_INITIAL_SET:
+            return ch, "kana"
         if "a" <= ch <= "z":
             return ch.upper(), "latin"
         if "A" <= ch <= "Z":

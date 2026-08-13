@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from kotone.db import Database
-from kotone.text import KANA_ROWS, LATIN_INITIALS
+from kotone.text import KANA_INITIALS, LATIN_INITIALS
 
 #: 一覧のソート軸（要件 3.2）
 ALBUM_SORTS: dict[str, str] = {
@@ -298,7 +298,7 @@ class LibraryRepository:
             (group,),
         )
         counts = {r["initial"]: int(r["count"]) for r in rows}
-        letters = KANA_ROWS if group == "kana" else LATIN_INITIALS
+        letters = KANA_INITIALS if group == "kana" else LATIN_INITIALS
         return [{"initial": ch, "count": counts.get(ch, 0)} for ch in letters]
 
     # ============================================================== 検索

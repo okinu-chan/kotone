@@ -36,6 +36,29 @@
     open = false;
   }
 
+  /**
+   * カナを五十音表の形（5 列）に並べ直す。
+   *
+   * サーバーは「あいうえお…」の一次元で返す。そのまま 5 列で流すと、
+   * 3 文字しかない「や行」以降が 1 列ずつずれて表として読めなくなるため、
+   * や行だけ「や・□・ゆ・□・よ」と空きを入れて母音の列を揃える。
+   */
+  const kanaRows = $derived.by(() => {
+    const rows = [];
+    let i = 0;
+    while (i < items.length) {
+      if (items[i].initial === 'や') {
+        const [ya, yu, yo] = items.slice(i, i + 3);
+        rows.push([ya, null, yu, null, yo]);
+        i += 3;
+      } else {
+        rows.push(items.slice(i, i + 5));
+        i += 5;
+      }
+    }
+    return rows;
+  });
+
   function onKeydown(event) {
     if (event.key === 'Escape') open = false;
   }
@@ -72,19 +95,42 @@
     {#if loading}
       <div class="loading"><div class="spinner"></div></div>
     {:else}
-      <div class="grid" class:latin={group === 'latin'}>
-        {#each items as item (item.initial)}
-          <button
-            class="cell"
-            class:disabled={item.count === 0}
-            disabled={item.count === 0}
-            onclick={() => choose(item)}
-          >
-            <span class="ch">{item.initial}</span>
-            <span class="count dim tabular">{item.count}</span>
-          </button>
-        {/each}
-      </div>
+      {#if group === 'kana'}
+        <!-- 五十音表。行と列が揃っていると目当ての文字を探しやすい -->
+        <div class="chart">
+          {#each kanaRows as row, index (index)}
+            {#each row as item, column (column)}
+              {#if item}
+                <button
+                  class="cell"
+                  class:disabled={item.count === 0}
+                  disabled={item.count === 0}
+                  onclick={() => choose(item)}
+                >
+                  <span class="ch">{item.initial}</span>
+                  <span class="count dim tabular">{item.count}</span>
+                </button>
+              {:else}
+                <span class="gap" aria-hidden="true"></span>
+              {/if}
+            {/each}
+          {/each}
+        </div>
+      {:else}
+        <div class="grid">
+          {#each items as item (item.initial)}
+            <button
+              class="cell"
+              class:disabled={item.count === 0}
+              disabled={item.count === 0}
+              onclick={() => choose(item)}
+            >
+              <span class="ch">{item.initial}</span>
+              <span class="count dim tabular">{item.count}</span>
+            </button>
+          {/each}
+        </div>
+      {/if}
     {/if}
 
     <footer class="dim">読み仮名をもとに頭出しします。</footer>
@@ -158,6 +204,21 @@
     align-content: start;
   }
 
+  /* 五十音表。列数を 5 に固定して母音の列を揃える */
+  .chart {
+    flex: 1;
+    overflow-y: auto;
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 8px;
+    align-content: start;
+  }
+
+  /* や行の空き。押せないぶんセルは置かず、場所だけ確保する */
+  .gap {
+    display: block;
+  }
+
   .cell {
     display: flex;
     flex-direction: column;
@@ -197,26 +258,18 @@
     text-align: center;
   }
 
-  /* 小画面では縦一列のインデックス帯にする（要件 3.7） */
+  /* 小画面。カナは 5 列のまま詰めて、表の形を崩さない（要件 3.7） */
   @media (max-width: 600px) {
     .grid {
       grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
     }
 
-    .grid:not(.latin) {
-      grid-template-columns: 1fr;
+    .chart {
       gap: 6px;
     }
 
-    .grid:not(.latin) .cell {
-      flex-direction: row;
-      justify-content: space-between;
-      min-height: 48px;
-      padding: 0 18px;
-    }
-
-    .grid:not(.latin) .ch {
-      font-size: 18px;
+    .chart .cell {
+      min-height: 56px;
     }
   }
 </style>

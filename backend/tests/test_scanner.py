@@ -17,6 +17,7 @@ from kotone.library.scanner import LibraryScanner
 from kotone.library.tags import TrackTags
 from kotone.repository import LibraryRepository
 from kotone.settings import SettingsStore
+from kotone.text import KANA_INITIALS
 
 # path -> タグ定義
 LIBRARY: dict[str, dict] = {
@@ -361,6 +362,11 @@ def test_initials_include_empty_buckets(scan: LibraryScanner, db: Database) -> N
     scan.scan()
     repo = LibraryRepository(db)
     kana = repo.initials("artists", "kana")
-    assert [item["initial"] for item in kana] == list("あかさたなはまやらわ")
+    # カナは五十音を 1 文字ずつ並べる（英数タブが A〜Z を並べるのと同じ形）
+    assert [item["initial"] for item in kana] == KANA_INITIALS
+    # 「宇多田ヒカル（うただひかる）」は「う」に入る（行の代表「あ」ではない）
+    counts = {item["initial"]: item["count"] for item in kana}
+    assert counts["う"] == 1
+    assert counts["あ"] == 0
     latin = repo.initials("artists", "latin")
     assert {item["initial"] for item in latin} >= {"R", "#"}

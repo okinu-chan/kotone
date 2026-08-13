@@ -27,6 +27,13 @@
         'loudness_preamp_db',
         'loudness_clip_prevention',
       ],
+      // この機能を知らない人が最初に読む場所。専門用語を使わずに何が起きるかを書く
+      intro:
+        'CD や配信は、作られた時期やジャンルによって録音そのものの音量がばらばらです。' +
+        'そのままだと曲が変わるたびにボリュームを触ることになります。' +
+        'ラウドネス補正は、あらかじめ計測しておいた曲ごとの音量をもとに再生音量を自動で調整し、' +
+        'どの曲もおおよそ同じ大きさで聴こえるようにする機能です。' +
+        '音のデータ自体は書き換えません。',
       note: 'ハードウェアミキサー（DAC 内蔵ボリューム）を使う場合、補正の精度は保証されません。',
     },
     {
@@ -216,6 +223,7 @@
   {#each GROUPS as group (group.title)}
     <section class="card">
       <h2>{group.title}</h2>
+      {#if group.intro}<p class="intro">{group.intro}</p>{/if}
       {#if group.note}<p class="note dim">{group.note}</p>{/if}
 
       {#if group.loudnessActions}
@@ -455,6 +463,17 @@
     margin: 0 0 12px;
     font-size: var(--fs-sm);
     line-height: 1.6;
+  }
+
+  /* この機能を知らない人向けの説明。注意書き（.note）より読ませたいので、
+     本文と同じ濃さにして左のアクセント罫で読み物として区切る。 */
+  .intro {
+    margin: 0 0 14px;
+    padding: 2px 0 2px 12px;
+    border-left: 2px solid var(--accent-dim);
+    font-size: var(--fs-md);
+    line-height: 1.75;
+    color: var(--text-muted);
   }
 
   .field {

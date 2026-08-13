@@ -1,5 +1,6 @@
 from kotone.text.reading import ReadingGenerator, get_reading_generator
 from kotone.text.sortkey import (
+    KANA_INITIALS,
     KANA_ROWS,
     LATIN_INITIALS,
     initial_of,
@@ -11,6 +12,7 @@ from kotone.text.sortkey import (
 __all__ = [
     "ReadingGenerator",
     "get_reading_generator",
+    "KANA_INITIALS",
     "KANA_ROWS",
     "LATIN_INITIALS",
     "initial_of",
