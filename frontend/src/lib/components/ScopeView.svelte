@@ -4,10 +4,12 @@
    * 値の完全一致によるシンプルなフィルタで、アルバムと曲の両方を出す。
    */
   import AlbumGrid from './AlbumGrid.svelte';
+  import AlbumLayoutToggle from './AlbumLayoutToggle.svelte';
+  import AlbumList from './AlbumList.svelte';
   import PageHeader from './PageHeader.svelte';
   import TrackList from './TrackList.svelte';
   import { api } from '../api.js';
-  import { player, toast } from '../stores.svelte.js';
+  import { libraryView, player, toast } from '../stores.svelte.js';
   import { router } from '../router.svelte.js';
 
   /** kind は 'genre' | 'year' */
@@ -93,10 +95,19 @@
       class:active={tab === 'tracks'}
       onclick={() => (tab = 'tracks')}>曲</button
     >
+
+    <!-- 表示形式はライブラリ・アーティスト画面と共有する -->
+    {#if tab === 'albums'}
+      <AlbumLayoutToggle />
+    {/if}
   </div>
 
   {#if tab === 'albums'}
-    <AlbumGrid {albums} />
+    {#if libraryView.layout === 'list'}
+      <AlbumList {albums} />
+    {:else}
+      <AlbumGrid {albums} />
+    {/if}
   {:else}
     <TrackList {tracks} showArtwork onplay={playTrack} />
   {/if}
@@ -124,12 +135,18 @@
 
   .tabs {
     display: flex;
+    align-items: center;
     gap: 6px;
     padding: 8px 16px;
     border-bottom: 1px solid var(--border);
   }
 
-  .tabs button {
+  /* タブは「アルバム」「曲」の 2 つだけなので、切り替えは右端へ寄せる */
+  .tabs :global(.layout-toggle) {
+    margin-left: auto;
+  }
+
+  .tabs > button {
     min-height: 38px;
     padding: 0 16px;
     border-radius: 999px;
@@ -139,7 +156,7 @@
     font-size: var(--fs-md);
   }
 
-  .tabs button.active {
+  .tabs > button.active {
     background: var(--accent);
     border-color: var(--accent);
     color: var(--on-accent);
