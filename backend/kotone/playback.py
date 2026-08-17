@@ -41,6 +41,25 @@ RANDOM_LOOKAHEAD = 1
 #: 一時停止からの再開時、これ以上ずれていたら止めた位置へ戻す（秒）
 RESUME_DRIFT_TOLERANCE = 0.4
 
+#: 曲が変わったときに実効音量を移す時間（秒）。
+#:
+#: ラウドネス補正はソフトウェアミキサーの音量で当てているため、曲が変わった
+#: 瞬間に setvol で切り替えると出力に段差ができ、「プツッ」というノイズになる。
+#: 曲間が無音なら気づかないが、クロスフェード中は前後の曲が重なって鳴っている
+#: 最中に段差が来るのではっきり聴こえる（実ライブラリには隣り合う曲で 29dB
+#: 差という例もある）。数百ミリ秒かけて移せば段差が無くなる。
+SONG_CHANGE_FADE_SECONDS = 0.35
+
+#: 音量スライダー操作を反映する時間（秒）。追従が遅れない範囲で段差を消す
+USER_VOLUME_FADE_SECONDS = 0.12
+
+#: フェード中に setvol を送る間隔（秒）。
+#:
+#: 細かいほど段差が小さくなる。1 段ごとに mixer イベントが返ってくるが、
+#: フェード中の配信は止めてあるので 50 回/秒でも負荷にはならない。
+#: 音量は 0〜100 の整数なので、これ以上細かくしても同じ値を送るだけになる。
+VOLUME_FADE_STEP_SECONDS = 0.02
+
 
 @dataclass
 class PlayScope:
@@ -82,6 +101,10 @@ class PlaybackController:
 
         self._random = _RandomState()
         self._expected_volume: int | None = None
+        #: 実行中の音量フェード。新しいフェードが始まったら前のものは打ち切る
+        self._fade_task: asyncio.Task[None] | None = None
+        #: 最後に MPD へ送った音量（フェードを途中から引き継ぐときの起点）
+        self._last_sent_volume: int | None = None
         self._last_song_id: str | None = None
         # 一時停止した位置と、そのときの曲（再開時のズレ補正に使う）
         self._paused_at: float | None = None
@@ -142,7 +165,14 @@ class PlaybackController:
                 await self._reconcile_external_volume()
             if "player" in subsystems:
                 await self._on_song_changed()
-            if subsystems & {"player", "mixer", "options", "playlist", "connection"}:
+
+            # フェード中の mixer イベントは自分の setvol が生んだもの。UI に出る
+            # 音量（user_volume）は動いていないので、1 段ごとに状態を配信しても
+            # 無駄に status を引いて WebSocket を流すだけになる。
+            notify = subsystems & {"player", "options", "playlist", "connection"}
+            if "mixer" in subsystems and not self._fading:
+                notify = True
+            if notify:
                 await self.broadcast_state()
         except MPDUnavailable:
             self.events.publish("player", {"connected": False})
@@ -156,9 +186,21 @@ class PlaybackController:
             return
         self._last_song_id = song_id
 
-        await self._apply_loudness(status)
+        await self._apply_loudness(status, fade=self._song_change_fade(status))
         if self.order_mode == "random":
             await self._top_up_random_queue(status)
+
+    def _song_change_fade(self, status: dict[str, Any]) -> float:
+        """曲の変わり目で実効音量を移すのにかける時間（秒）。
+
+        クロスフェード中は前後の曲が重なって鳴っているので、その長さいっぱいを
+        使って移す。前の曲は自分の音量から離れていくが、どのみち消えていく側
+        なので気にならず、次の曲は重なりが終わる頃に自分の音量へ収まる。
+        """
+        crossfade = _int_or_none(status.get("xfade")) or 0
+        if crossfade > 0:
+            return float(crossfade)
+        return SONG_CHANGE_FADE_SECONDS
 
     # ======================================================== 再生スコープ
 
@@ -505,7 +547,10 @@ class PlaybackController:
     async def set_volume(self, volume: int) -> None:
         self.user_volume = max(0, min(100, int(volume)))
         self._persist_state()
-        await self._apply_loudness(await self.mpd.status())
+        # スライダーを大きく動かしたときの段差を消す。追従が遅れない程度に短く
+        await self._apply_loudness(
+            await self.mpd.status(), fade=USER_VOLUME_FADE_SECONDS
+        )
         await self.broadcast_state()
 
     async def _reconcile_external_volume(self) -> None:
@@ -518,6 +563,10 @@ class PlaybackController:
         """
         if self.external_volume:
             return  # 音量はアンプ側で取る構成なので追随しない
+        if self._fading:
+            # フェード中は自分の setvol が次々と mixer イベントを生む。観測値が
+            # 1 つ前の段の値になることがあり、外部からの変更と見分けられない。
+            return
         status = await self.mpd.status()
         try:
             observed = int(status.get("volume", -1))
@@ -531,21 +580,71 @@ class PlaybackController:
         self._expected_volume = observed
         self._persist_state()
 
-    async def _apply_loudness(self, status: dict[str, Any]) -> None:
-        """現在の曲に合わせて実効音量を設定する。"""
+    async def _apply_loudness(
+        self, status: dict[str, Any], *, fade: float = 0.0
+    ) -> None:
+        """現在の曲に合わせて実効音量を設定する。
+
+        ``fade`` を指定すると、その秒数をかけて今の音量から移す。曲の変わり目で
+        一気に変えると段差がノイズになるため（:data:`SONG_CHANGE_FADE_SECONDS`）。
+        """
         factor = await self._current_factor()
         effective = max(0, min(100, round(self._base_volume() * factor)))
         try:
             current = int(status.get("volume", -1))
         except (TypeError, ValueError):
             current = -1
+
+        # フェードの途中なら、status の値より「最後に送った値」のほうが実際の
+        # 音量に近い（status は 1 つ前の段のことがある）。そこから続けて動かす。
+        if self._fading and self._last_sent_volume is not None:
+            current = self._last_sent_volume
+        self._cancel_fade()
+
         # 期待値は setvol より先に記録する。set_volume が発する mixer idle
         # イベントが _reconcile_external_volume に「外部変更」と誤認されて
         # 音量がドリフトするのを防ぐ（記録前にイベントが処理されるレース対策）。
         self._expected_volume = effective
         if current == effective:
             return
-        await self.mpd.set_volume(effective)
+        if fade <= 0 or current < 0:
+            await self._send_volume(effective)
+            return
+        self._fade_task = asyncio.create_task(self._fade_volume(current, effective, fade))
+
+    async def _send_volume(self, value: int) -> None:
+        self._last_sent_volume = value
+        await self.mpd.set_volume(value)
+
+    def _cancel_fade(self) -> None:
+        if self._fade_task is not None and not self._fade_task.done():
+            self._fade_task.cancel()
+        self._fade_task = None
+
+    @property
+    def _fading(self) -> bool:
+        """音量フェードの実行中か（外部音量への追随を止める判断に使う）。"""
+        return self._fade_task is not None and not self._fade_task.done()
+
+    async def _fade_volume(self, start: int, target: int, duration: float) -> None:
+        """音量を段階的に動かす。
+
+        setvol はそのたびに mixer イベントを生む。フェード中は観測値が
+        1 つ前の段の値であることがあり、外部からの変更と見分けられないため、
+        :meth:`_reconcile_external_volume` 側で追随を止めている。
+        """
+        # 音量は整数なので、差の分より細かく刻んでも同じ値を送るだけになる。
+        # 長いクロスフェードでは刻みのほうを広げて、無駄な setvol を出さない。
+        distance = abs(target - start)
+        steps = max(1, min(round(duration / VOLUME_FADE_STEP_SECONDS), distance))
+        interval = duration / steps
+        try:
+            for step in range(1, steps + 1):
+                await self._send_volume(round(start + (target - start) * step / steps))
+                if step < steps:
+                    await asyncio.sleep(interval)
+        except MPDUnavailable:
+            log.debug("音量フェード中に MPD との接続が切れました")
 
     async def _current_factor(self) -> float:
         """現在の曲に適用すべき音量倍率。補正が無効なら 1.0。"""

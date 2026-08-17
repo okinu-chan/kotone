@@ -6,8 +6,11 @@ MPD への依存は最小限のフェイクで差し替える。
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
+from kotone import playback
 from kotone.db import Database
 from kotone.events import EventBus
 from kotone.playback import PlaybackController
@@ -25,6 +28,8 @@ class FakeMPD:
         self.song_id = "1"
         #: 再開時に進んでしまう秒数（実機で 1〜3 秒観測された）
         self.resume_drift = 0.0
+        #: クロスフェードの秒数（MPD の status が返す xfade）
+        self.xfade = 0
 
     def on_event(self, cb) -> None:  # noqa: ANN001
         pass
@@ -35,6 +40,7 @@ class FakeMPD:
             "state": self.state,
             "elapsed": self.elapsed,
             "songid": self.song_id,
+            "xfade": self.xfade,
         }
 
     async def current_song(self) -> dict:
@@ -43,6 +49,11 @@ class FakeMPD:
     async def set_volume(self, v: int) -> None:
         self.volume = max(0, min(100, int(v)))
         self.calls.append(("setvol", self.volume))
+
+    @property
+    def volumes(self) -> list[int]:
+        """送られた setvol の値だけを順に取り出す。"""
+        return [v for name, v in self.calls if name == "setvol"]
 
     async def play(self, position: int | None = None) -> None:
         self.state = "play"
@@ -303,3 +314,162 @@ async def test_external_mode_ignores_external_volume_events(controller) -> None:
     mpd.volume = 20
     await ctrl._reconcile_external_volume()
     assert ctrl.user_volume == 55  # 変化しない
+
+
+# ------------------------------------- 曲の変わり目のノイズ対策（音量フェード）
+
+
+@pytest.fixture
+def fast_fade(monkeypatch: pytest.MonkeyPatch) -> None:
+    """テストを待たせないため、フェードの刻みを詰める。"""
+    monkeypatch.setattr(playback, "VOLUME_FADE_STEP_SECONDS", 0.001)
+
+
+async def test_song_change_moves_volume_gradually(db, settings, fast_fade) -> None:
+    """曲が変わったときの音量変化を段階的にする。
+
+    一気に setvol すると出力に段差ができ、クロスフェード中は前後の曲が
+    重なって鳴っている最中なのではっきりノイズとして聴こえる。
+    """
+    mpd = FakeMPD(state="play")
+    mpd.volume = 100
+    mpd.xfade = 3
+    repo = FakeRepo({"a.flac": {"track_gain_db": -7.69, "track_peak": 0.9,
+                                "album_gain_db": -7.69, "album_peak": 0.9}})
+    ctrl = PlaybackController(mpd, db, repo, settings, EventBus())
+    settings.set("volume_control", "external")
+
+    mpd.song_id = "2"                       # 次の曲へ進んだ
+    await ctrl._on_song_changed()
+    await ctrl._fade_task
+
+    volumes = mpd.volumes
+    # 100 -> 41 を一気にではなく刻んで下ろす
+    assert len(volumes) > 10
+    assert volumes[-1] == 41
+    assert volumes == sorted(volumes, reverse=True)
+    # どの一歩も小さいこと（段差が残っていない）
+    assert max(abs(b - a) for a, b in zip(volumes, volumes[1:], strict=False)) <= 3
+
+
+async def test_fade_spans_the_crossfade_duration(db, settings, fast_fade) -> None:
+    """クロスフェード中は、その長さいっぱいを使って移す。"""
+    mpd = FakeMPD(state="play")
+    mpd.volume = 100
+    mpd.xfade = 6
+    ctrl = PlaybackController(mpd, db, FakeRepo({}), settings, EventBus())
+
+    assert ctrl._song_change_fade(await mpd.status()) == 6.0
+    mpd.xfade = 0
+    # クロスフェードなしでも段差は消す（ギャップレス再生の曲間で鳴るため）
+    assert ctrl._song_change_fade(await mpd.status()) == playback.SONG_CHANGE_FADE_SECONDS
+
+
+async def test_new_song_change_continues_from_current_level(db, settings, fast_fade) -> None:
+    """フェードの途中で次の曲へ進んでも、音量が飛ばずに続きから動くこと。"""
+    mpd = FakeMPD(state="play")
+    mpd.volume = 100
+    mpd.xfade = 3
+    repo = FakeRepo({"a.flac": {"track_gain_db": -20.0, "track_peak": 0.5,
+                                "album_gain_db": -20.0, "album_peak": 0.5}})
+    ctrl = PlaybackController(mpd, db, repo, settings, EventBus())
+    settings.set("volume_control", "external")
+
+    mpd.song_id = "2"
+    await ctrl._apply_loudness(await mpd.status(), fade=0.4)
+    await asyncio.sleep(0.05)               # フェードの途中
+    interrupted_at = mpd.volume
+    assert 10 < interrupted_at < 100        # 実際に下がっている最中
+
+    # まだ下がりきらないうちに次の曲へ
+    repo.tracks["a.flac"]["track_gain_db"] = 0.0
+    mpd.song_id = "3"
+    await ctrl._apply_loudness(await mpd.status(), fade=0.1)
+    await ctrl._fade_task
+
+    volumes = mpd.volumes
+    assert volumes[-1] == 100
+    # 打ち切った地点から上げ直す（100 へ飛んだり、いったん元へ戻ったりしない）
+    assert max(abs(b - a) for a, b in zip(volumes, volumes[1:], strict=False)) <= 3
+
+
+async def test_fade_ignores_its_own_mixer_events(db, settings, fast_fade) -> None:
+    """フェード中の mixer イベントを外部からの音量変更と誤認しないこと。
+
+    setvol は 1 段ごとに mixer イベントを生む。観測値は 1 つ前の段の値である
+    ことがあり、期待値との一致では見分けられない。
+    """
+    mpd = FakeMPD(state="play")
+    mpd.volume = 100
+    ctrl = PlaybackController(mpd, db, FakeRepo({}), settings, EventBus())
+    ctrl.user_volume = 80
+    ctrl._expected_volume = 100
+
+    ctrl._fade_task = asyncio.create_task(ctrl._fade_volume(100, 40, 0.05))
+    await asyncio.sleep(0.01)
+    await ctrl._reconcile_external_volume()
+    assert ctrl.user_volume == 80           # 自分のフェードでは変わらない
+    await ctrl._fade_task
+
+    # フェードが終われば、外部からの変更にはこれまでどおり追随する
+    mpd.volume = 25
+    await ctrl._reconcile_external_volume()
+    assert ctrl.user_volume == 25
+
+
+async def test_volume_slider_still_lands_on_the_requested_value(db, settings, fast_fade) -> None:
+    """スライダー操作もフェードするが、最終的な値はずれないこと。"""
+    mpd = FakeMPD(state="play")
+    mpd.volume = 20
+    ctrl = PlaybackController(mpd, db, FakeRepo({}), settings, EventBus())
+
+    await ctrl.set_volume(70)
+    await ctrl._fade_task
+    assert mpd.volume == 70
+    assert ctrl.user_volume == 70
+
+
+async def test_fade_does_not_flood_clients_with_state(db, settings, fast_fade) -> None:
+    """フェード中の mixer イベントで状態を配信しないこと。
+
+    setvol は 1 段ごとに mixer イベントを生む。そのたびに配信すると、
+    UI に出る音量は動いていないのに 3 秒間で数十回流れることになる。
+    """
+    mpd = FakeMPD(state="play")
+    mpd.volume = 100
+    ctrl = PlaybackController(mpd, db, FakeRepo({}), settings, EventBus())
+
+    broadcasts = 0
+
+    async def count() -> None:
+        nonlocal broadcasts
+        broadcasts += 1
+
+    ctrl.broadcast_state = count
+
+    ctrl._fade_task = asyncio.create_task(ctrl._fade_volume(100, 40, 0.05))
+    await ctrl._on_mpd_event({"mixer"})
+    assert broadcasts == 0
+    await ctrl._fade_task
+
+    # フェードが終われば、音量の変化はこれまでどおり配信する
+    await ctrl._on_mpd_event({"mixer"})
+    assert broadcasts == 1
+
+
+async def test_song_change_is_still_broadcast_during_a_fade(db, settings, fast_fade) -> None:
+    """曲が変わったことは、フェード中でも必ず配信すること。"""
+    mpd = FakeMPD(state="play")
+    ctrl = PlaybackController(mpd, db, FakeRepo({}), settings, EventBus())
+
+    broadcasts = 0
+
+    async def count() -> None:
+        nonlocal broadcasts
+        broadcasts += 1
+
+    ctrl.broadcast_state = count
+    ctrl._fade_task = asyncio.create_task(ctrl._fade_volume(100, 40, 0.05))
+    await ctrl._on_mpd_event({"player", "mixer"})
+    assert broadcasts == 1
+    await ctrl._fade_task
