@@ -68,7 +68,8 @@ export const api = {
   genres: () => get('/library/genres'),
   formats: () => get('/library/formats'),
   years: () => get('/library/years'),
-  initials: (entity, group) => get(`/library/initials/${entity}`, { group }),
+  initials: (entity, group, initialBy) =>
+    get(`/library/initials/${entity}`, { group, initial_by: initialBy }),
   search: (q, limit = 20) => get('/library/search', { q, limit }),
 
   // --- 再生 -----------------------------------------------------------

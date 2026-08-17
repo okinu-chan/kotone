@@ -37,6 +37,7 @@ def list_albums(
     sort: str = "artist",
     initial: str | None = None,
     initial_group: Literal["kana", "latin"] | None = None,
+    initial_by: Literal["artist", "album"] = "artist",
     artist_id: int | None = None,
     genre_id: int | None = None,
     year: int | None = None,
@@ -46,13 +47,20 @@ def list_albums(
     limit: int | None = Query(default=None, ge=1, le=2000),
     offset: int = Query(default=0, ge=0),
 ) -> dict[str, Any]:
+    """アルバム一覧。
+
+    ``initial`` はアルバム名とアルバムアーティスト名のどちらの頭文字でも引ける
+    （``initial_by``）。既定はアーティスト名で、ウォークマンの頭出しに倣う。
+    """
     items = ctx.repo.list_albums(
-        sort=sort, initial=initial, initial_group=initial_group, artist_id=artist_id,
+        sort=sort, initial=initial, initial_group=initial_group,
+        initial_by=initial_by, artist_id=artist_id,
         genre_id=genre_id, year=year, query=q, codec=codec, quality=quality,
         limit=limit, offset=offset,
     )
     total = ctx.repo.count_albums(
-        initial=initial, initial_group=initial_group, artist_id=artist_id,
+        initial=initial, initial_group=initial_group, initial_by=initial_by,
+        artist_id=artist_id,
         genre_id=genre_id, year=year, query=q, codec=codec, quality=quality,
     )
     return {"items": items, "total": total, "offset": offset}
@@ -163,12 +171,21 @@ def initials(
     ctx: Ctx,
     entity: Literal["albums", "artists", "tracks"],
     group: Literal["kana", "latin"] = "kana",
+    initial_by: Literal["artist", "album"] = "artist",
 ) -> dict[str, Any]:
     """頭文字ごとの件数（要件 3.7）。
 
     件数 0 の文字も返すのでグリッドのレイアウトが動かない。
+    ``entity="albums"`` では ``initial_by`` でアルバム名／アルバムアーティスト名を
+    切り替える。``/albums`` の絞り込みと同じ条件で数えるので、表示された件数と
+    実際に出てくる枚数が一致する。
     """
-    return {"entity": entity, "group": group, "items": ctx.repo.initials(entity, group)}
+    return {
+        "entity": entity,
+        "group": group,
+        "initial_by": initial_by,
+        "items": ctx.repo.initials(entity, group, initial_by),
+    }
 
 
 # ------------------------------------------------------------------ 検索

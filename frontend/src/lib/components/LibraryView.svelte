@@ -68,6 +68,7 @@
       sort: libraryView.sort,
       initial,
       initial_group: initialGroup,
+      initial_by: libraryView.initialBy,
       codec: libraryView.codec,
       quality: libraryView.quality,
     };
@@ -150,6 +151,7 @@
   function onInitialSelected(event) {
     libraryView.initial = event.initial;
     libraryView.initialGroup = event.group;
+    if (event.by) libraryView.initialBy = event.by;
     router.forgetScroll('/library');
     window.scrollTo(0, 0);
   }

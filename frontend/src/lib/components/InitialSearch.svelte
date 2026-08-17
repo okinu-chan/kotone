@@ -8,6 +8,7 @@
    * ・1 タップ領域は 44px 四方以上
    */
   import { api } from '../api.js';
+  import { libraryView, settings } from '../stores.svelte.js';
 
   let { entity = 'albums', open = $bindable(false), onselect } = $props();
 
@@ -15,13 +16,24 @@
   let items = $state([]);
   let loading = $state(false);
 
+  // アルバム一覧はアーティスト名の頭文字でも引ける。アーティスト一覧では
+  // アルバム名で引く意味がないので、切り替えはアルバムのときだけ出す。
+  const canSwitchTarget = $derived(entity === 'albums');
+  const initialBy = $derived(canSwitchTarget ? libraryView.initialBy : 'artist');
+
+  function setInitialBy(next) {
+    libraryView.initialBy = next;
+    settings.set('initial_search_by', next);
+  }
+
   $effect(() => {
     if (!open) return;
     const currentEntity = entity;
     const currentGroup = group;
+    const currentBy = initialBy;
     loading = true;
     api
-      .initials(currentEntity, currentGroup)
+      .initials(currentEntity, currentGroup, currentBy)
       .then((payload) => {
         items = payload.items;
       })
@@ -32,7 +44,7 @@
 
   function choose(item) {
     if (item.count === 0) return;
-    onselect?.({ initial: item.initial, group });
+    onselect?.({ initial: item.initial, group, by: initialBy });
     open = false;
   }
 
@@ -92,6 +104,22 @@
       <button class="close" onclick={() => (open = false)} aria-label="閉じる">✕</button>
     </header>
 
+    {#if canSwitchTarget}
+      <!-- どちらの名前の頭文字で引くか。既定はアーティスト名 -->
+      <div class="target" role="group" aria-label="頭文字で引く対象">
+        <button
+          class:active={initialBy === 'artist'}
+          aria-pressed={initialBy === 'artist'}
+          onclick={() => setInitialBy('artist')}>アーティスト名</button
+        >
+        <button
+          class:active={initialBy === 'album'}
+          aria-pressed={initialBy === 'album'}
+          onclick={() => setInitialBy('album')}>アルバム名</button
+        >
+      </div>
+    {/if}
+
     {#if loading}
       <div class="loading"><div class="spinner"></div></div>
     {:else}
@@ -133,7 +161,15 @@
       {/if}
     {/if}
 
-    <footer class="dim">読み仮名をもとに頭出しします。</footer>
+    <footer class="dim">
+      {#if canSwitchTarget && initialBy === 'artist'}
+        アーティスト名の読み仮名をもとに頭出しします。
+      {:else if canSwitchTarget}
+        アルバム名の読み仮名をもとに頭出しします。
+      {:else}
+        読み仮名をもとに頭出しします。
+      {/if}
+    </footer>
   </div>
 {/if}
 
@@ -176,6 +212,28 @@
     background: var(--accent);
     border-color: var(--accent);
     color: var(--on-accent);
+  }
+
+  /* 頭文字を引く対象の切り替え。タブ（カナ／英数）と区別できるよう、
+     塗りではなく下線で選択中を示す */
+  .target {
+    display: flex;
+    gap: 4px;
+    margin: -6px 0 12px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .target button {
+    min-height: var(--tap);
+    padding: 0 14px;
+    color: var(--text-dim);
+    font-size: var(--fs-md);
+    border-bottom: 2px solid transparent;
+  }
+
+  .target button.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
   }
 
   .close {

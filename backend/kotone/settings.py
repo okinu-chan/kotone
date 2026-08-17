@@ -144,6 +144,13 @@ SETTING_SPECS: tuple[SettingSpec, ...] = (
         choices=("grid", "list"),
     ),
     SettingSpec(
+        "initial_search_by", "artist", "頭文字で絞り込む対象", "enum",
+        "アルバム一覧をイニシャルサーチするとき、アルバム名とアーティスト名の"
+        "どちらの頭文字で引くか。既定はアーティスト名（ウォークマンの頭出しに倣う）。"
+        "イニシャルサーチの画面でも切り替えられ、選んだほうが次回に引き継がれます。",
+        choices=("artist", "album"),
+    ),
+    SettingSpec(
         "theme", "dark", "テーマ", "enum", "画面の配色。", choices=("dark", "light"),
     ),
     SettingSpec(

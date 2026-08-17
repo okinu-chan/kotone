@@ -96,6 +96,7 @@ class LibraryRepository:
         sort: str = "artist",
         initial: str | None = None,
         initial_group: str | None = None,
+        initial_by: str = "album",
         artist_id: int | None = None,
         genre_id: int | None = None,
         year: int | None = None,
@@ -106,7 +107,8 @@ class LibraryRepository:
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         where, params = _album_filters(
-            initial=initial, initial_group=initial_group, artist_id=artist_id,
+            initial=initial, initial_group=initial_group, initial_by=initial_by,
+            artist_id=artist_id,
             genre_id=genre_id, year=year, query=query, codec=codec, quality=quality,
         )
         order = ALBUM_SORTS.get(sort, ALBUM_SORTS["artist"])
@@ -286,17 +288,32 @@ class LibraryRepository:
 
     # ======================================================= イニシャルサーチ
 
-    def initials(self, entity: str, group: str = "kana") -> list[dict[str, Any]]:
-        """頭文字ごとの件数（要件 3.7）。件数 0 の文字も返してグリッドを固定表示する。"""
+    def initials(
+        self, entity: str, group: str = "kana", initial_by: str = "album"
+    ) -> list[dict[str, Any]]:
+        """頭文字ごとの件数（要件 3.7）。件数 0 の文字も返してグリッドを固定表示する。
+
+        ``entity="albums"`` のときだけ ``initial_by`` が効く。``"artist"`` を
+        指定すると、アルバム名ではなくアルバムアーティスト名の頭文字で数える
+        （ウォークマンの頭出しに倣った既定）。
+        """
         table = {"albums": "albums", "artists": "artists", "tracks": "tracks"}.get(entity)
         if table is None:
             raise ValueError(f"未知の対象です: {entity}")
 
-        rows = self.db.query(
-            f"SELECT initial, COUNT(*) AS count FROM {table} "
-            "WHERE initial_group = ? GROUP BY initial",
-            (group,),
-        )
+        if table == "albums" and initial_by == "artist":
+            rows = self.db.query(
+                f"SELECT {_ARTIST_INITIAL} AS initial, COUNT(*) AS count "
+                "FROM albums al LEFT JOIN artists aa ON aa.id = al.album_artist_id "
+                f"WHERE {_ARTIST_INITIAL_GROUP} = ? GROUP BY 1",
+                (group,),
+            )
+        else:
+            rows = self.db.query(
+                f"SELECT initial, COUNT(*) AS count FROM {table} "
+                "WHERE initial_group = ? GROUP BY initial",
+                (group,),
+            )
         counts = {r["initial"]: int(r["count"]) for r in rows}
         letters = KANA_INITIALS if group == "kana" else LATIN_INITIALS
         return [{"initial": ch, "count": counts.get(ch, 0)} for ch in letters]
@@ -443,10 +460,20 @@ def _paginate(
     return sql, params
 
 
+#: アルバムをアルバムアーティスト名の頭文字で引くときの式。
+#:
+#: アルバムアーティストが決まらないアルバム（実ライブラリでは 1,007 枚中 83 枚、
+#: すべてコンピレーション）は NULL になる。そのままだとどの頭文字にも当たらず
+#: イニシャルサーチから辿り着けなくなるため、「英数・他」タブの「#」に寄せる。
+_ARTIST_INITIAL = "COALESCE(aa.initial, '#')"
+_ARTIST_INITIAL_GROUP = "COALESCE(aa.initial_group, 'latin')"
+
+
 def _album_filters(
     *,
     initial: str | None = None,
     initial_group: str | None = None,
+    initial_by: str = "album",
     artist_id: int | None = None,
     genre_id: int | None = None,
     year: int | None = None,
@@ -456,11 +483,15 @@ def _album_filters(
 ) -> tuple[str, list[Any]]:
     clauses: list[str] = []
     params: list[Any] = []
+    # 頭文字はアルバム名とアルバムアーティスト名のどちらでも引ける
+    by_artist = initial_by == "artist"
+    initial_expr = _ARTIST_INITIAL if by_artist else "al.initial"
+    group_expr = _ARTIST_INITIAL_GROUP if by_artist else "al.initial_group"
     if initial:
-        clauses.append("al.initial = ?")
+        clauses.append(f"{initial_expr} = ?")
         params.append(initial)
     if initial_group:
-        clauses.append("al.initial_group = ?")
+        clauses.append(f"{group_expr} = ?")
         params.append(initial_group)
     if artist_id is not None:
         # アルバムアーティストだけでなく、収録曲のアーティストも対象にする

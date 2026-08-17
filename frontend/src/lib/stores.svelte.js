@@ -161,6 +161,9 @@ class SettingsStore {
       if (['grid', 'list'].includes(this.values.album_layout)) {
         libraryView.layout = this.values.album_layout;
       }
+      if (['artist', 'album'].includes(this.values.initial_search_by)) {
+        libraryView.initialBy = this.values.initial_search_by;
+      }
     } catch (error) {
       toast.error(error.detail || String(error));
     }
@@ -247,6 +250,13 @@ class LibraryViewState {
   layout = $state('grid');
   initial = $state(null);
   initialGroup = $state(null);
+  /**
+   * 頭文字を引く対象（'artist' | 'album'）。
+   *
+   * ウォークマンの頭出しに倣って既定はアーティスト名。設定に保存するので、
+   * イニシャルサーチの画面で切り替えると次回もそのまま開く。
+   */
+  initialBy = $state('artist');
   /** フォーマット／音質の絞り込み */
   codec = $state(null);
   quality = $state(null);
@@ -271,6 +281,7 @@ class LibraryViewState {
       this.sort,
       this.initial ?? '',
       this.initialGroup ?? '',
+      this.initialBy,
       this.codec ?? '',
       this.quality ?? '',
     ].join('|');
@@ -284,7 +295,10 @@ class LibraryViewState {
   get activeFilters() {
     const chips = [];
     if (this.initial) {
-      chips.push({ key: 'initial', label: `頭文字「${this.initial}」` });
+      // どちらの名前で引いたかを添える（同じ「か」でも結果が違うため）
+      const target =
+        this.view === 'albums' ? (this.initialBy === 'artist' ? 'アーティスト' : 'アルバム') : '';
+      chips.push({ key: 'initial', label: `${target}頭文字「${this.initial}」` });
     }
     if (this.quality) {
       const labels = { hires: 'ハイレゾ', cd: 'CD 品質', dsd: 'DSD' };

@@ -370,3 +370,59 @@ def test_initials_include_empty_buckets(scan: LibraryScanner, db: Database) -> N
     assert counts["あ"] == 0
     latin = repo.initials("artists", "latin")
     assert {item["initial"] for item in latin} >= {"R", "#"}
+
+
+def test_album_initials_can_use_the_artist_name(scan: LibraryScanner, db: Database) -> None:
+    """アルバム一覧をアルバムアーティスト名の頭文字でも引けること（要件 3.7）。
+
+    ウォークマンの頭出しに倣って既定はアーティスト名。同じ頭文字でも
+    アルバム名で引いたときとは結果が変わる。
+    """
+    scan.scan()
+    repo = LibraryRepository(db)
+
+    by_artist = repo.list_albums(initial="う", initial_group="kana", initial_by="artist")
+    # 「宇多田ヒカル」の「First Love」は、アルバム名では A〜Z 側に入る
+    assert {a["name"] for a in by_artist} == {"First Love"}
+
+    by_album = repo.list_albums(initial="う", initial_group="kana", initial_by="album")
+    assert by_album == []
+
+
+def test_album_initial_counts_match_the_filter(scan: LibraryScanner, db: Database) -> None:
+    """表示する件数と、実際に絞り込んだときの枚数が一致すること。"""
+    scan.scan()
+    repo = LibraryRepository(db)
+
+    for group in ("kana", "latin"):
+        for item in repo.initials("albums", group, "artist"):
+            got = repo.count_albums(
+                initial=item["initial"], initial_group=group, initial_by="artist"
+            )
+            assert got == item["count"], (group, item["initial"])
+
+
+def test_albums_without_an_album_artist_stay_reachable(
+    scan: LibraryScanner, db: Database
+) -> None:
+    """アルバムアーティストが決まらないアルバムも頭文字から辿れること。
+
+    実ライブラリでは 1,007 枚中 83 枚（すべてコンピレーション）が該当する。
+    どの頭文字にも当たらないと、その分がイニシャルサーチから消えてしまう。
+    """
+    scan.scan()
+    repo = LibraryRepository(db)
+    db.execute("UPDATE albums SET album_artist_id = NULL WHERE name = 'Compilation'")
+    db.commit()
+
+    hits = repo.list_albums(initial="#", initial_group="latin", initial_by="artist")
+    assert "Compilation" in {a["name"] for a in hits}
+
+    # 頭文字の合計が総数と一致する = どこにも入らないアルバムが無い
+    total = repo.count_albums()
+    counted = sum(
+        item["count"]
+        for group in ("kana", "latin")
+        for item in repo.initials("albums", group, "artist")
+    )
+    assert counted == total
