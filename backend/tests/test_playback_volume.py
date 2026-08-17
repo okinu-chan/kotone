@@ -566,3 +566,128 @@ async def test_single_track_scope_does_not_advance(db, settings) -> None:
     await ctrl.next()
 
     assert mpd.nexted == 0
+
+
+# --------------------------- 範囲を鳴らし終えたら先頭で待機する（NW-ZX300 に倣う）
+
+
+class EndingMPD(QueueMPD):
+    """最後まで鳴らし終えて停止した状態を作れるフェイク。"""
+
+    def __init__(self, length: int = 3) -> None:
+        super().__init__(position=length - 1, length=length)
+        self.song_id = str(length - 1)
+
+    def finish_queue(self) -> None:
+        """MPD がキューを使い切って止まった状態にする。"""
+        self.state = "stop"
+
+    async def play(self, position: int | None = None) -> None:
+        await super().play(position)
+        if position is not None:
+            self.position = position
+            self.song_id = str(position)
+        self.elapsed = 0.0
+
+    async def stop(self) -> None:
+        self.state = "stop"
+        self.calls.append(("stop", None))
+
+
+async def test_finishing_the_scope_waits_at_the_top(db, settings) -> None:
+    """鳴らし終えたら、範囲の先頭で一時停止して操作待ちにする。
+
+    MPD はキューを使い切ると止まるだけで、画面から曲もアルバムも消える。
+    聴き終えたアルバムを聴き直すのにライブラリから探し直すことになる。
+    """
+    mpd = EndingMPD(length=3)
+    ctrl = _controller(mpd, db, settings)
+    ctrl._last_play_state = "play"
+    mpd.finish_queue()
+
+    handled = await ctrl._return_to_scope_top(await mpd.status())
+
+    assert handled
+    assert mpd.position == 0            # 先頭の曲に構える
+    assert mpd.state == "pause"         # 鳴らさずに待つ
+    assert mpd.elapsed == 0.0
+
+
+async def test_returning_to_the_top_is_silent(db, settings) -> None:
+    """先頭へ構え直す間に音が出ないこと（いったん無音にしてから止める）。"""
+    mpd = EndingMPD(length=3)
+    ctrl = _controller(mpd, db, settings)
+    ctrl.user_volume = 55
+    ctrl._last_play_state = "play"
+    mpd.finish_queue()
+
+    await ctrl._return_to_scope_top(await mpd.status())
+
+    volumes = mpd.volumes
+    # play より前に 0 まで落としている
+    assert volumes[0] == 0
+    assert [c[0] for c in mpd.calls].index("setvol") < [c[0] for c in mpd.calls].index("play")
+    # 待機中の音量は先頭の曲に合わせた値へ戻す
+    assert mpd.volume == 55
+    assert ctrl._expected_volume == 55   # 自分で下げた 0 を外部変更と誤認しない
+
+
+async def test_stop_button_does_not_rewind(db, settings) -> None:
+    """停止ボタンで止めたときは先頭へ戻さない（意図した停止のため）。"""
+    mpd = EndingMPD(length=3)
+    ctrl = _controller(mpd, db, settings)
+    ctrl._last_play_state = "play"
+
+    await ctrl.stop()
+    mpd.state = "stop"
+    handled = await ctrl._return_to_scope_top(await mpd.status())
+
+    assert not handled
+    assert mpd.position == 2
+
+
+async def test_stop_flag_does_not_leak_into_the_next_end(db, settings) -> None:
+    """停止ボタンの印が、次に鳴らし終えたときまで残らないこと。"""
+    mpd = EndingMPD(length=3)
+    ctrl = _controller(mpd, db, settings)
+    ctrl._last_play_state = "play"
+
+    await ctrl.stop()
+    mpd.state = "stop"
+    await ctrl._return_to_scope_top(await mpd.status())
+
+    # もう一度再生して、今度は最後まで鳴らし終えた
+    mpd.state = "play"
+    await ctrl._return_to_scope_top(await mpd.status())
+    mpd.position = 2
+    mpd.state = "stop"
+    handled = await ctrl._return_to_scope_top(await mpd.status())
+
+    assert handled
+    assert mpd.position == 0
+
+
+@pytest.mark.parametrize(
+    ("repeat", "order"), [("range", "normal"), ("one", "normal"), ("off", "random")]
+)
+async def test_repeat_or_random_never_finishes(db, settings, repeat, order) -> None:
+    """リピート中やランダムでは鳴らし終えないので、先頭へ戻す処理も走らない。"""
+    mpd = EndingMPD(length=3)
+    ctrl = _controller(mpd, db, settings)
+    ctrl.repeat_mode = repeat
+    ctrl.order_mode = order
+    ctrl._last_play_state = "play"
+    mpd.finish_queue()
+
+    assert not await ctrl._return_to_scope_top(await mpd.status())
+
+
+async def test_pause_is_not_mistaken_for_the_end(db, settings) -> None:
+    """一時停止は停止ではないので、先頭へ戻さない。"""
+    mpd = EndingMPD(length=3)
+    ctrl = _controller(mpd, db, settings)
+    ctrl._last_play_state = "play"
+    mpd.state = "pause"
+
+    assert not await ctrl._return_to_scope_top(await mpd.status())
+    assert mpd.position == 2

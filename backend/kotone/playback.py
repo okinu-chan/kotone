@@ -109,6 +109,10 @@ class PlaybackController:
         # 一時停止した位置と、そのときの曲（再開時のズレ補正に使う）
         self._paused_at: float | None = None
         self._paused_song_id: str | None = None
+        # 直前の再生状態と、明示的な停止かどうか（範囲を鳴らし終えた判定に使う）
+        self._last_play_state: str | None = None
+        self._user_stopped = False
+        self._returning_to_top = False
         self._lock = asyncio.Lock()
         self._cached_state: dict[str, Any] = {}
 
@@ -181,6 +185,9 @@ class PlaybackController:
 
     async def _on_song_changed(self) -> None:
         status = await self.mpd.status()
+        if await self._return_to_scope_top(status):
+            return
+
         song_id = status.get("songid")
         if song_id == self._last_song_id:
             return
@@ -189,6 +196,59 @@ class PlaybackController:
         await self._apply_loudness(status, fade=SONG_CHANGE_FADE_SECONDS)
         if self.order_mode == "random":
             await self._top_up_random_queue(status)
+
+    async def _return_to_scope_top(self, status: dict[str, Any]) -> bool:
+        """範囲を鳴らし終えたら、その先頭で操作待ちにする（NW-ZX300 に倣う）。
+
+        MPD はキューを使い切ると停止するだけなので、画面から曲もアルバムも
+        消えてしまう。聴き終えたアルバムをもう一度鳴らすにも、ライブラリから
+        探し直すことになる。先頭の曲を一時停止の状態で構えておけば、再生
+        ボタンひとつで頭から聴き直せる。
+
+        戻したときは True を返す（続きの処理は次のイベントに任せる）。
+        """
+        state = status.get("state")
+        was_playing = self._last_play_state == "play"
+        self._last_play_state = state
+
+        if state != "stop":
+            # 停止ボタンの印が次の停止まで残らないよう、鳴り始めたら降ろす
+            self._user_stopped = False
+            return False
+        if not was_playing or self._returning_to_top:
+            return False
+        if self._user_stopped:
+            self._user_stopped = False   # 停止ボタンによる停止はそのまま
+            return False
+        # リピート中は巻き戻るので鳴らし終わらない。ランダムは曲が足され続ける
+        if self.repeat_mode != "off" or self.order_mode != "normal":
+            return False
+        if (_int_or_none(status.get("playlistlength")) or 0) == 0:
+            return False
+
+        self._returning_to_top = True
+        try:
+            # 先頭を「一時停止・0 秒」に構える。play したままだと鳴ってしまう
+            # ので、いったん無音にしてから止める（ごく短くても音は出る）。
+            self._cancel_fade()
+            # 期待値も合わせて記録する。合わせないと、自分で下げた 0 を
+            # 他クライアントによる変更と誤認して user_volume が 0 になる
+            self._expected_volume = 0
+            await self._send_volume(0)
+            await self.mpd.play(0)
+            await self.mpd.pause(True)
+            await self.mpd.seek(0)
+            self._paused_at = None
+            self._paused_song_id = None
+            self._last_song_id = (await self.mpd.status()).get("songid")
+            # 止まっている間に、先頭の曲に合った音量へ戻しておく
+            await self._apply_loudness(await self.mpd.status())
+        except MPDUnavailable:
+            log.warning("範囲の先頭へ戻せませんでした")
+        finally:
+            self._returning_to_top = False
+        log.info("範囲を鳴らし終えたので先頭で待機します: %s", self.scope.label)
+        return True
 
     # ======================================================== 再生スコープ
 
@@ -302,6 +362,8 @@ class PlaybackController:
         self._paused_at = None
 
     async def stop(self) -> None:
+        # 自分で止めたのか、キューを使い切って止まったのかを見分ける印
+        self._user_stopped = True
         await self.mpd.stop()
 
     async def next(self) -> None:
