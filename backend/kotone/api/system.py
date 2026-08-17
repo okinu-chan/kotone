@@ -47,8 +47,6 @@ async def update_settings(ctx: Ctx, body: SettingsPatch) -> dict[str, Any]:
 
     # 再生に影響する設定は即座に MPD へ反映する
     if ctx.mpd.connected:
-        if {"crossfade_enabled", "crossfade_seconds"} & set(body.values):
-            await ctx.player.apply_crossfade()
         if {
             "loudness_enabled", "loudness_mode", "loudness_preamp_db",
             "loudness_clip_prevention",

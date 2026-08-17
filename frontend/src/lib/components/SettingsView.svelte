@@ -13,8 +13,6 @@
       keys: [
         'volume_control',
         'startup_warmup_ms',
-        'crossfade_enabled',
-        'crossfade_seconds',
         'gapless_enabled',
         'random_avoid_last',
       ],

@@ -28,8 +28,6 @@ class FakeMPD:
         self.song_id = "1"
         #: 再開時に進んでしまう秒数（実機で 1〜3 秒観測された）
         self.resume_drift = 0.0
-        #: クロスフェードの秒数（MPD の status が返す xfade）
-        self.xfade = 0
 
     def on_event(self, cb) -> None:  # noqa: ANN001
         pass
@@ -40,7 +38,6 @@ class FakeMPD:
             "state": self.state,
             "elapsed": self.elapsed,
             "songid": self.song_id,
-            "xfade": self.xfade,
         }
 
     async def current_song(self) -> dict:
@@ -328,12 +325,11 @@ def fast_fade(monkeypatch: pytest.MonkeyPatch) -> None:
 async def test_song_change_moves_volume_gradually(db, settings, fast_fade) -> None:
     """曲が変わったときの音量変化を段階的にする。
 
-    一気に setvol すると出力に段差ができ、クロスフェード中は前後の曲が
-    重なって鳴っている最中なのではっきりノイズとして聴こえる。
+    一気に setvol すると出力に段差ができ、「プツッ」というノイズになる。
+    ギャップレス再生でつながっているライブ盤などではそのまま聴こえる。
     """
     mpd = FakeMPD(state="play")
     mpd.volume = 100
-    mpd.xfade = 3
     repo = FakeRepo({"a.flac": {"track_gain_db": -7.69, "track_peak": 0.9,
                                 "album_gain_db": -7.69, "album_peak": 0.9}})
     ctrl = PlaybackController(mpd, db, repo, settings, EventBus())
@@ -352,24 +348,26 @@ async def test_song_change_moves_volume_gradually(db, settings, fast_fade) -> No
     assert max(abs(b - a) for a, b in zip(volumes, volumes[1:], strict=False)) <= 3
 
 
-async def test_fade_spans_the_crossfade_duration(db, settings, fast_fade) -> None:
-    """クロスフェード中は、その長さいっぱいを使って移す。"""
+async def test_song_change_uses_the_fixed_fade(db, settings, fast_fade) -> None:
+    """曲の変わり目のフェード時間は一定（クロスフェードは提供しない）。"""
     mpd = FakeMPD(state="play")
     mpd.volume = 100
-    mpd.xfade = 6
-    ctrl = PlaybackController(mpd, db, FakeRepo({}), settings, EventBus())
+    repo = FakeRepo({"a.flac": {"track_gain_db": -6.0, "track_peak": 1.0,
+                                "album_gain_db": -6.0, "album_peak": 1.0}})
+    ctrl = PlaybackController(mpd, db, repo, settings, EventBus())
+    settings.set("volume_control", "external")
 
-    assert ctrl._song_change_fade(await mpd.status()) == 6.0
-    mpd.xfade = 0
-    # クロスフェードなしでも段差は消す（ギャップレス再生の曲間で鳴るため）
-    assert ctrl._song_change_fade(await mpd.status()) == playback.SONG_CHANGE_FADE_SECONDS
+    mpd.song_id = "2"
+    await ctrl._on_song_changed()
+    assert ctrl._fading
+    await ctrl._fade_task
+    assert mpd.volumes[-1] == 50            # 100 * 10^(-6/20)
 
 
 async def test_new_song_change_continues_from_current_level(db, settings, fast_fade) -> None:
     """フェードの途中で次の曲へ進んでも、音量が飛ばずに続きから動くこと。"""
     mpd = FakeMPD(state="play")
     mpd.volume = 100
-    mpd.xfade = 3
     repo = FakeRepo({"a.flac": {"track_gain_db": -20.0, "track_peak": 0.5,
                                 "album_gain_db": -20.0, "album_peak": 0.5}})
     ctrl = PlaybackController(mpd, db, repo, settings, EventBus())

@@ -45,9 +45,9 @@ RESUME_DRIFT_TOLERANCE = 0.4
 #:
 #: ラウドネス補正はソフトウェアミキサーの音量で当てているため、曲が変わった
 #: 瞬間に setvol で切り替えると出力に段差ができ、「プツッ」というノイズになる。
-#: 曲間が無音なら気づかないが、クロスフェード中は前後の曲が重なって鳴っている
-#: 最中に段差が来るのではっきり聴こえる（実ライブラリには隣り合う曲で 29dB
-#: 差という例もある）。数百ミリ秒かけて移せば段差が無くなる。
+#: 実ライブラリには隣り合う曲で 29dB 差（音量 100 → 41 の跳び）という例もある。
+#: 曲間が無音なら気づかないが、ギャップレス再生でつながっているライブ盤などでは
+#: 段差がそのまま聴こえる。数百ミリ秒かけて移せば段差が無くなる。
 SONG_CHANGE_FADE_SECONDS = 0.35
 
 #: 音量スライダー操作を反映する時間（秒）。追従が遅れない範囲で段差を消す
@@ -122,7 +122,7 @@ class PlaybackController:
         if await self.mpd.wait_connected(timeout=2.0):
             try:
                 await self._apply_mode_flags()
-                await self.apply_crossfade()
+                await self._disable_crossfade()
             except MPDUnavailable:
                 log.warning("起動時に MPD へ設定を反映できませんでした")
 
@@ -158,9 +158,9 @@ class PlaybackController:
     async def _on_mpd_event(self, subsystems: set[str]) -> None:
         try:
             if "connection" in subsystems and self.mpd.connected:
-                # 再接続時にモードとクロスフェードを入れ直す
+                # 再接続時にモードを入れ直す
                 await self._apply_mode_flags()
-                await self.apply_crossfade()
+                await self._disable_crossfade()
             if "mixer" in subsystems:
                 await self._reconcile_external_volume()
             if "player" in subsystems:
@@ -186,21 +186,9 @@ class PlaybackController:
             return
         self._last_song_id = song_id
 
-        await self._apply_loudness(status, fade=self._song_change_fade(status))
+        await self._apply_loudness(status, fade=SONG_CHANGE_FADE_SECONDS)
         if self.order_mode == "random":
             await self._top_up_random_queue(status)
-
-    def _song_change_fade(self, status: dict[str, Any]) -> float:
-        """曲の変わり目で実効音量を移すのにかける時間（秒）。
-
-        クロスフェード中は前後の曲が重なって鳴っているので、その長さいっぱいを
-        使って移す。前の曲は自分の音量から離れていくが、どのみち消えていく側
-        なので気にならず、次の曲は重なりが終わる頃に自分の音量へ収まる。
-        """
-        crossfade = _int_or_none(status.get("xfade")) or 0
-        if crossfade > 0:
-            return float(crossfade)
-        return SONG_CHANGE_FADE_SECONDS
 
     # ======================================================== 再生スコープ
 
@@ -373,10 +361,14 @@ class PlaybackController:
         await self.mpd.set_random(self.order_mode == "shuffle")
         await self.mpd.set_consume(False)
 
-    async def apply_crossfade(self) -> None:
-        enabled = bool(self.settings.get("crossfade_enabled"))
-        seconds = int(self.settings.get("crossfade_seconds") or 0)
-        await self.mpd.set_crossfade(seconds if enabled else 0)
+    async def _disable_crossfade(self) -> None:
+        """MPD 側のクロスフェードを必ず切る。
+
+        kotone はクロスフェードを提供しない（:mod:`kotone.settings` の
+        冒頭に理由を書いてある）。MPD は state_file に crossfade を残すので、
+        以前の設定や他のクライアントの操作が生き残らないようにする。
+        """
+        await self.mpd.set_crossfade(0)
 
     # ------------------------------------------------ ランダム（重複あり）
 
@@ -634,7 +626,7 @@ class PlaybackController:
         :meth:`_reconcile_external_volume` 側で追随を止めている。
         """
         # 音量は整数なので、差の分より細かく刻んでも同じ値を送るだけになる。
-        # 長いクロスフェードでは刻みのほうを広げて、無駄な setvol を出さない。
+        # 長いフェードでは刻みのほうを広げて、無駄な setvol を出さない。
         distance = abs(target - start)
         steps = max(1, min(round(duration / VOLUME_FADE_STEP_SECONDS), distance))
         interval = duration / steps
@@ -704,7 +696,6 @@ class PlaybackController:
             "effective_volume": _int_or_none(status.get("volume")),
             "repeat": self.repeat_mode,
             "order": self.order_mode,
-            "crossfade": _int_or_none(status.get("xfade")) or 0,
             "scope": self.scope.as_dict(),
             "queue_length": _int_or_none(status.get("playlistlength")) or 0,
             "queue_position": _int_or_none(status.get("song")),

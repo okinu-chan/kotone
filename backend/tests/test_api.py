@@ -163,14 +163,14 @@ def test_reading_suggest(client: TestClient) -> None:
 
 def test_settings_roundtrip(client: TestClient) -> None:
     payload = client.get("/api/settings").json()
-    assert payload["values"]["crossfade_enabled"] is False
-    assert any(spec["key"] == "crossfade_seconds" for spec in payload["specs"])
+    assert payload["values"]["gapless_enabled"] is True
+    assert any(spec["key"] == "startup_warmup_ms" for spec in payload["specs"])
 
     updated = client.patch(
-        "/api/settings", json={"values": {"crossfade_enabled": True, "crossfade_seconds": 5}}
+        "/api/settings", json={"values": {"gapless_enabled": False, "startup_warmup_ms": 800}}
     )
     assert updated.status_code == 200
-    assert updated.json()["values"]["crossfade_seconds"] == 5
+    assert updated.json()["values"]["startup_warmup_ms"] == 800
 
 
 def test_settings_rejects_unknown_key(client: TestClient) -> None:
@@ -179,8 +179,19 @@ def test_settings_rejects_unknown_key(client: TestClient) -> None:
 
 
 def test_settings_clamps_out_of_range(client: TestClient) -> None:
-    response = client.patch("/api/settings", json={"values": {"crossfade_seconds": 999}})
-    assert response.json()["values"]["crossfade_seconds"] == 30
+    response = client.patch("/api/settings", json={"values": {"startup_warmup_ms": 99999}})
+    assert response.json()["values"]["startup_warmup_ms"] == 3000
+
+
+def test_crossfade_settings_are_gone(client: TestClient) -> None:
+    """クロスフェードは提供しない（理由は kotone.settings の冒頭）。"""
+    payload = client.get("/api/settings").json()
+    assert "crossfade_enabled" not in payload["values"]
+    assert not any(spec["key"].startswith("crossfade") for spec in payload["specs"])
+
+    # 古いクライアントが送ってきても弾く（黙って無視しない）
+    response = client.patch("/api/settings", json={"values": {"crossfade_enabled": True}})
+    assert response.status_code == 400
 
 
 def test_analyze_artists_endpoint(client: TestClient) -> None:

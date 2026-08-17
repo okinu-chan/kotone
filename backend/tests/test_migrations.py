@@ -87,3 +87,24 @@ def test_migrations_are_idempotent_once_applied(db: Database) -> None:
     version = current_version(db.conn)
     assert apply_migrations(db.conn) == []
     assert current_version(db.conn) == version
+
+
+def test_0004_removes_retired_crossfade_settings(tmp_path: Path) -> None:
+    """廃止したクロスフェード設定が DB に残らないこと。
+
+    読み込み時に無視されるので動作には影響しないが、「設定してあるのに
+    効かない」値が居座ったままになる。
+    """
+    db = Database(tmp_path / "library.sqlite3")
+    _apply_up_to(db.conn, 3, tmp_path)
+
+    for key, value in (("crossfade_enabled", "true"), ("crossfade_seconds", "5"),
+                       ("gapless_enabled", "true")):
+        db.execute("INSERT INTO settings (key, value) VALUES (?, ?)", (key, value))
+    db.commit()
+
+    apply_migrations(db.conn, MIGRATIONS_DIR)
+
+    keys = {r["key"] for r in db.query("SELECT key FROM settings")}
+    assert keys == {"gapless_enabled"}
+    db.close()
