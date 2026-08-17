@@ -44,6 +44,7 @@ def list_albums(
     q: str | None = None,
     codec: str | None = None,
     quality: Literal["hires", "cd", "dsd"] | None = None,
+    recent: bool = False,
     limit: int | None = Query(default=None, ge=1, le=2000),
     offset: int = Query(default=0, ge=0),
 ) -> dict[str, Any]:
@@ -51,18 +52,19 @@ def list_albums(
 
     ``initial`` はアルバム名とアルバムアーティスト名のどちらの頭文字でも引ける
     （``initial_by``）。既定はアーティスト名で、ウォークマンの頭出しに倣う。
+
+    ``recent`` を立てると、起点より後に追加されたアルバムだけを返す。起点は
+    初回スキャンの直後に置くので、最初に取り込んだライブラリ全体は含まれない
+    （:data:`kotone.stats.KEY_RECENT_BASELINE`）。
     """
-    items = ctx.repo.list_albums(
-        sort=sort, initial=initial, initial_group=initial_group,
-        initial_by=initial_by, artist_id=artist_id,
-        genre_id=genre_id, year=year, query=q, codec=codec, quality=quality,
-        limit=limit, offset=offset,
-    )
-    total = ctx.repo.count_albums(
-        initial=initial, initial_group=initial_group, initial_by=initial_by,
-        artist_id=artist_id,
-        genre_id=genre_id, year=year, query=q, codec=codec, quality=quality,
-    )
+    added_after = ctx.stats.recent_baseline if recent else None
+    common = {
+        "initial": initial, "initial_group": initial_group, "initial_by": initial_by,
+        "artist_id": artist_id, "genre_id": genre_id, "year": year, "query": q,
+        "codec": codec, "quality": quality, "added_after": added_after,
+    }
+    items = ctx.repo.list_albums(sort=sort, limit=limit, offset=offset, **common)
+    total = ctx.repo.count_albums(**common)
     return {"items": items, "total": total, "offset": offset}
 
 

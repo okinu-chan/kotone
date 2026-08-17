@@ -25,6 +25,13 @@ DEFAULT_LOUDNESS_THROUGHPUT_RSGAIN = 335.0
 
 KEY_LOUDNESS_THROUGHPUT = "loudness_throughput"
 
+#: 「最近追加したアルバム」の起点（この時刻より後に追加されたものを新着とする）。
+#:
+#: 最初のスキャンではライブラリ全体が取り込まれるので、そのまま日付で見ると
+#: 全部が新着になってしまう。初回スキャンが済んだ時点を起点として控えておき、
+#: それ以降に増えたぶんだけを新着として扱う。
+KEY_RECENT_BASELINE = "recent_baseline"
+
 #: スループットの記録に必要な最小の音源長（秒）。
 #: これを下回るサンプルは起動時間の影響が大きすぎて実力を表さない。
 MIN_THROUGHPUT_SAMPLE_SECONDS = 300.0
@@ -68,6 +75,53 @@ class StatsStore:
                 """,
                 (key, f"{value:.4f}"),
             )
+
+    def get_text(self, key: str) -> str | None:
+        row = self._db.query_one("SELECT value FROM runtime_stats WHERE key = ?", (key,))
+        return str(row["value"]) if row and row["value"] else None
+
+    def set_text(self, key: str, value: str) -> None:
+        with self._db.transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO runtime_stats (key, value, updated_at)
+                VALUES (?, ?, datetime('now'))
+                ON CONFLICT (key) DO UPDATE
+                    SET value = excluded.value, updated_at = excluded.updated_at
+                """,
+                (key, value),
+            )
+
+    # --- 新着アルバムの起点 ---------------------------------------------
+
+    @property
+    def recent_baseline(self) -> str | None:
+        """この時刻より後に追加されたアルバムを新着として扱う（未設定なら None）。"""
+        return self.get_text(KEY_RECENT_BASELINE)
+
+    def mark_recent_baseline(self) -> str:
+        """いまを起点にする。ここまでに入っているものは新着から外れる。"""
+        self._db.execute(
+            """
+            INSERT INTO runtime_stats (key, value, updated_at)
+            VALUES (?, datetime('now'), datetime('now'))
+            ON CONFLICT (key) DO UPDATE
+                SET value = datetime('now'), updated_at = datetime('now')
+            """,
+            (KEY_RECENT_BASELINE,),
+        )
+        self._db.commit()
+        return self.recent_baseline or ""
+
+    def ensure_recent_baseline(self) -> None:
+        """まだ起点が無ければ、いまを起点にする。
+
+        初回スキャンの直後に呼ぶ。取り込んだライブラリ全体が新着になって
+        しまうのを防ぐ（利用者が「最近追加した」と感じるのは、そのあとで
+        足したぶんだけ）。
+        """
+        if self.recent_baseline is None:
+            self.mark_recent_baseline()
 
     # --- ラウドネス計測 -------------------------------------------------
 

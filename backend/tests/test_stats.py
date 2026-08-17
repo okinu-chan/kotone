@@ -15,6 +15,7 @@ from kotone.stats import (
     DEFAULT_LOUDNESS_THROUGHPUT,
     DEFAULT_LOUDNESS_THROUGHPUT_RSGAIN,
     KEY_LOUDNESS_THROUGHPUT,
+    KEY_RECENT_BASELINE,
     StatsStore,
     default_throughput,
     estimate_loudness,
@@ -153,3 +154,32 @@ def test_runtime_stats_table_exists(db: Database) -> None:
     stats = StatsStore(db)
     stats.set_float(KEY_LOUDNESS_THROUGHPUT, 12.5)
     assert stats.get_float(KEY_LOUDNESS_THROUGHPUT, 0.0) == pytest.approx(12.5)
+
+
+# --------------------------------------------- 「最近追加したアルバム」の起点
+
+
+def test_recent_baseline_is_unset_at_first(stats: StatsStore) -> None:
+    assert stats.recent_baseline is None
+
+
+def test_ensure_sets_the_baseline_once(stats: StatsStore) -> None:
+    """初回スキャンで起点が置かれ、以降のスキャンでは動かないこと。
+
+    毎回いまに更新すると、直前に足したアルバムまで新着から外れてしまう。
+    """
+    stats.ensure_recent_baseline()
+    first = stats.recent_baseline
+    assert first is not None
+
+    stats.ensure_recent_baseline()
+    assert stats.recent_baseline == first
+
+
+def test_mark_moves_the_baseline(stats: StatsStore) -> None:
+    """明示的に印を付け直すと起点が更新されること。"""
+    stats.mark_recent_baseline()
+    before = stats.recent_baseline
+    stats.set_text(KEY_RECENT_BASELINE, "2000-01-01 00:00:00")
+    assert stats.recent_baseline == "2000-01-01 00:00:00"
+    assert before != stats.recent_baseline

@@ -273,6 +273,13 @@ class LibraryViewState {
   /** フォーマット／音質の絞り込み */
   codec = $state(null);
   quality = $state(null);
+  /**
+   * 新着だけに絞るか。
+   *
+   * 起点（初回スキャン直後）より後に追加されたアルバムだけを出す。
+   * 最初の取り込みぶんは含まれないので、後から足したアルバムを探すのに使える。
+   */
+  recent = $state(false);
   /** 一覧のスクロール位置（ピクセル） */
   scrollY = $state(0);
   /** 設定から初期値を読み込んだかどうか */
@@ -294,6 +301,7 @@ class LibraryViewState {
       this.sort,
       this.codec ?? '',
       this.quality ?? '',
+      this.recent ? 'recent' : '',
     ].join('|');
   }
 
@@ -305,6 +313,9 @@ class LibraryViewState {
   get activeFilters() {
     // 頭文字は絞り込みではなく頭出しなので、チップには出さない
     const chips = [];
+    if (this.recent) {
+      chips.push({ key: 'recent', label: '最近追加' });
+    }
     if (this.quality) {
       const labels = { hires: 'ハイレゾ', cd: 'CD 品質', dsd: 'DSD' };
       chips.push({ key: 'quality', label: labels[this.quality] ?? this.quality });
@@ -320,12 +331,15 @@ class LibraryViewState {
       this.quality = null;
     } else if (key === 'codec') {
       this.codec = null;
+    } else if (key === 'recent') {
+      this.recent = false;
     }
   }
 
   clearFilter() {
     this.codec = null;
     this.quality = null;
+    this.recent = false;
     this.pendingJump = null;
     this.scrollY = 0;
   }

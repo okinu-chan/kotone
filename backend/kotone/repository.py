@@ -107,6 +107,7 @@ class LibraryRepository:
         query: str | None = None,
         codec: str | None = None,
         quality: str | None = None,
+        added_after: str | None = None,
         limit: int | None = None,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
@@ -114,6 +115,7 @@ class LibraryRepository:
             initial=initial, initial_group=initial_group, initial_by=initial_by,
             artist_id=artist_id,
             genre_id=genre_id, year=year, query=query, codec=codec, quality=quality,
+            added_after=added_after,
         )
         order = ALBUM_SORTS.get(sort, ALBUM_SORTS["artist"])
         sql = f"{_ALBUM_SELECT} {where} ORDER BY {order}"
@@ -484,6 +486,7 @@ def _album_filters(
     query: str | None = None,
     codec: str | None = None,
     quality: str | None = None,
+    added_after: str | None = None,
 ) -> tuple[str, list[Any]]:
     clauses: list[str] = []
     params: list[Any] = []
@@ -532,6 +535,11 @@ def _album_filters(
             clauses.append(
                 f"EXISTS (SELECT 1 FROM tracks t WHERE t.album_id = al.id AND {condition})"
             )
+    if added_after:
+        # 新着（この時刻より後に入ったアルバム）。起点の決め方は
+        # kotone.stats.KEY_RECENT_BASELINE を参照
+        clauses.append("al.added_at > ?")
+        params.append(added_after)
     return (f"WHERE {' AND '.join(clauses)}" if clauses else ""), params
 
 
@@ -560,6 +568,7 @@ def _track_filters(
     query: str | None = None,
     codec: str | None = None,
     quality: str | None = None,
+    added_after: str | None = None,
 ) -> tuple[str, list[Any]]:
     clauses: list[str] = ["t.missing = 0"]
     params: list[Any] = []

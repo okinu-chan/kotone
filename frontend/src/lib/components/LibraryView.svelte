@@ -70,6 +70,7 @@
       sort: libraryView.sort,
       codec: libraryView.codec,
       quality: libraryView.quality,
+      recent: libraryView.recent || undefined,
     };
 
     // 条件が前回と同じなら、取得済みの一覧をそのまま出す。

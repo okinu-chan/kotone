@@ -135,6 +135,10 @@ class LibraryScanner:
             self._scan_loudness(result)
             self.db.commit()
 
+            # 初回スキャンで取り込んだぶんは「最近追加した」に含めない。
+            # ここを起点にして、以降に増えたアルバムだけを新着として扱う。
+            self.stats.ensure_recent_baseline()
+
         except Exception as exc:
             log.exception("ライブラリスキャンが失敗しました")
             self._set_state(status="error", phase="", error=str(exc), finished_at=True)

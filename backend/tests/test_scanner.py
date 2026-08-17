@@ -6,6 +6,7 @@ DB への取り込み・読み仮名生成・アーティスト分割・再ス�
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,7 @@ from kotone.library.scanner import LibraryScanner
 from kotone.library.tags import TrackTags
 from kotone.repository import LibraryRepository
 from kotone.settings import SettingsStore
+from kotone.stats import StatsStore
 from kotone.text import KANA_INITIALS
 
 # path -> タグ定義
@@ -426,3 +428,83 @@ def test_albums_without_an_album_artist_stay_reachable(
         for item in repo.initials("albums", group, "artist")
     )
     assert counted == total
+
+
+# ------------------------------------------- 「最近追加したアルバム」の絞り込み
+
+
+def test_first_scan_is_not_treated_as_recent(scan: LibraryScanner, db: Database) -> None:
+    """初回スキャンで取り込んだぶんは新着に入らないこと。
+
+    最初の取り込みではライブラリ全体が同じ時期に入るので、追加日で見ると
+    全部が新着になってしまう。それでは絞り込む意味が無い。
+    """
+    scan.scan()
+    repo = LibraryRepository(db)
+    stats = StatsStore(db)
+
+    assert stats.recent_baseline is not None
+    assert repo.count_albums() > 0
+    assert repo.count_albums(added_after=stats.recent_baseline) == 0
+
+
+def test_albums_added_later_are_recent(
+    scan: LibraryScanner, db: Database, config: Config
+) -> None:
+    """起点より後に増えたアルバムだけが新着として返ること。
+
+    2 回目以降のスキャンで起点が動いてしまうと、足したばかりのアルバムが
+    すぐ新着から外れる。そこも確かめる。
+    """
+    scan.scan()
+    stats = StatsStore(db)
+    repo = LibraryRepository(db)
+    baseline = stats.recent_baseline
+    assert repo.count_albums(added_after=baseline) == 0
+
+    new_path = "中島みゆき/時代/01 時代.flac"
+    LIBRARY[new_path] = {
+        "title": "時代",
+        "artists": ["中島みゆき"],
+        "album_artists": ["中島みゆき"],
+        "album": "時代",
+        "genres": ["J-Pop"],
+        "date": "1975",
+        "track_no": 1,
+    }
+    try:
+        path = config.music_dir / new_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(bytes(128))
+        # 追加日は秒までしか持たないので、起点と同じ秒に入らないようずらす
+        time.sleep(1.1)
+        scan.scan()
+
+        assert StatsStore(db).recent_baseline == baseline   # 起点は動かない
+        recent = repo.list_albums(sort="added", added_after=baseline)
+        assert [a["name"] for a in recent] == ["時代"]
+    finally:
+        LIBRARY.pop(new_path)
+
+
+def test_recent_filter_combines_with_other_filters(
+    scan: LibraryScanner, db: Database
+) -> None:
+    """新着の絞り込みは、ほかの絞り込みと重ねられること。"""
+    scan.scan()
+    stats = StatsStore(db)
+    repo = LibraryRepository(db)
+    db.execute(
+        "INSERT INTO albums (album_key, name, sort_key, initial, initial_group, added_at) "
+        "VALUES ('new', 'New One', 'new one', 'N', 'latin', datetime('now', '+1 hour'))"
+    )
+    db.commit()
+
+    assert repo.count_albums(
+        added_after=stats.recent_baseline, initial="N", initial_group="latin",
+        initial_by="album",
+    ) == 1
+    assert repo.count_albums(
+        added_after=stats.recent_baseline, initial="Z", initial_group="latin",
+        initial_by="album",
+    ) == 0

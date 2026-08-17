@@ -23,6 +23,8 @@
   };
 
   let formats = $state(null);
+  /** 新着（起点より後に追加された）アルバムの枚数。null は取得前 */
+  let recentCount = $state(null);
 
   $effect(() => {
     if (!open || formats) return;
@@ -33,6 +35,26 @@
       })
       .catch((error) => toast.error(error.detail || String(error)));
   });
+
+  // 枚数は追加されるたびに変わるので、シートを開くたびに数え直す
+  $effect(() => {
+    if (!open) return;
+    api
+      .albums({ recent: true, limit: 1 })
+      .then((payload) => {
+        recentCount = payload.total;
+      })
+      .catch(() => {
+        recentCount = null;
+      });
+  });
+
+  function toggleRecent() {
+    libraryView.recent = !libraryView.recent;
+    // 新着は入った順に見たいので、並び順も追加日にそろえる
+    if (libraryView.recent) libraryView.sort = 'added';
+    onapply?.();
+  }
 
   function setQuality(key) {
     libraryView.quality = libraryView.quality === key ? null : key;
@@ -67,6 +89,28 @@
         </button>
       {/each}
     </div>
+  </section>
+
+  <section>
+    <h3>最近追加したアルバム</h3>
+    <div class="chips">
+      <button
+        class:selected={libraryView.recent}
+        onclick={toggleRecent}
+        aria-pressed={libraryView.recent}
+        disabled={recentCount === 0}
+      >
+        新しく増えたぶんだけ
+        {#if recentCount !== null}<span class="count dim tabular">{recentCount}</span>{/if}
+      </button>
+    </div>
+    <p class="hint dim">
+      {#if recentCount === 0}
+        最初に取り込んだぶんより後に追加されたアルバムはまだありません。
+      {:else}
+        最初に取り込んだライブラリは含みません。あとから足したアルバムだけが並びます。
+      {/if}
+    </p>
   </section>
 
   <section>
@@ -155,9 +199,15 @@
     font-size: var(--fs-md);
   }
 
-  .chips button:hover {
+  .chips button:hover:not(:disabled) {
     background: var(--surface-hover);
     color: var(--text);
+  }
+
+  /* 該当が 0 件のときは選べない（押しても空の一覧になるだけ） */
+  .chips button:disabled {
+    opacity: 0.4;
+    cursor: default;
   }
 
   .chips button.selected {
@@ -177,6 +227,13 @@
   .empty {
     margin: 0;
     font-size: var(--fs-md);
+  }
+
+  /* この絞り込みが何を出すのかは名前だけでは伝わらないので一行添える */
+  .hint {
+    margin: 8px 0 0;
+    font-size: var(--fs-sm);
+    line-height: 1.6;
   }
 
   .loading {
