@@ -172,6 +172,27 @@ h3 {
   color: var(--text-muted);
 }
 
+/* イニシャルサーチで飛んだ先を一瞬示す。
+   対象はアルバム一覧などの子コンポーネントが持つ要素なので、
+   スコープの外から当てられるようここに置く。 */
+.jump-target {
+  animation: jump-flash 1.4s ease-out;
+}
+
+@keyframes jump-flash {
+  0%,
+  25% {
+    box-shadow:
+      0 0 0 2px var(--accent),
+      0 0 14px var(--accent-glow);
+  }
+  100% {
+    box-shadow:
+      0 0 0 2px transparent,
+      0 0 14px transparent;
+  }
+}
+
 .spinner {
   width: 22px;
   height: 22px;

@@ -62,13 +62,12 @@
 
   $effect(() => {
     const currentView = libraryView.view;
-    const initial = libraryView.initial;
-    const initialGroup = libraryView.initialGroup;
+    // 頭出しの指定はここで読んで、この effect の依存に入れる。並び順が
+    // 変わる場合は一覧を読み直したあとに飛ばないと位置がずれる
+    const jump = libraryView.pendingJump;
+    // 頭文字は絞り込みに使わない（イニシャルサーチは頭出し）。一覧は全件のまま
     const params = {
       sort: libraryView.sort,
-      initial,
-      initial_group: initialGroup,
-      initial_by: libraryView.initialBy,
       codec: libraryView.codec,
       quality: libraryView.quality,
     };
@@ -86,6 +85,7 @@
       total = cached.total;
       loading = false;
       restoreScroll();
+      applyJump(jump);
       return;
     }
 
@@ -97,7 +97,7 @@
         albums = payload.items;
         total = payload.total;
       } else if (currentView === 'artists') {
-        const payload = await api.artists({ initial, initial_group: initialGroup });
+        const payload = await api.artists();
         artists = payload.items;
         total = payload.total;
       } else if (currentView === 'genres') {
@@ -119,6 +119,7 @@
       .finally(() => {
         loading = false;
         restoreScroll();
+        applyJump(jump);
       });
   });
 
@@ -148,15 +149,83 @@
     window.scrollTo(0, 0);
   }
 
+  /**
+   * 頭文字が選ばれたら、絞り込まずにその位置まで飛ぶ。
+   *
+   * 絞り込んでしまうと「か」の並びしか見えず、すぐ上の「お」を見るには
+   * いったん解除して探し直すことになる。頭出しなら短いスクロールで届く。
+   */
   function onInitialSelected(event) {
-    libraryView.initial = event.initial;
-    libraryView.initialGroup = event.group;
     if (event.by) libraryView.initialBy = event.by;
+    if (libraryView.view === 'albums') {
+      // 並び順が頭文字の対象と食い違っていると「位置」が意味を持たない
+      // （アルバム名順の一覧でアーティストの「か」は散らばっている）
+      libraryView.sort = event.by === 'album' ? 'album' : 'artist';
+    }
+    libraryView.pendingJump = { initial: event.initial, group: event.group, by: event.by };
     router.forgetScroll('/library');
-    window.scrollTo(0, 0);
+  }
+
+  /** 一覧の中で、頭出し先にあたる要素の番号。見つからなければ -1。 */
+  function findJumpIndex(jump) {
+    const matches = (initial, group) => initial === jump.initial && group === jump.group;
+    if (libraryView.view === 'artists') {
+      return artists.findIndex((a) => matches(a.initial, a.initial_group));
+    }
+    if (jump.by === 'album') {
+      return albums.findIndex((a) => matches(a.initial, a.initial_group));
+    }
+    return albums.findIndex((a) =>
+      matches(a.album_artist_initial, a.album_artist_initial_group),
+    );
+  }
+
+  /** 固定表示されているヘッダー類の高さ（この分だけ余裕を持たせて止める）。 */
+  function stickyOffset() {
+    return ['.page-header', '.toolbar', '.filter-chips'].reduce((sum, selector) => {
+      const el = document.querySelector(selector);
+      return sum + (el ? el.getBoundingClientRect().height : 0);
+    }, 0);
+  }
+
+  function applyJump(jump) {
+    if (!jump) return;
+    const index = findJumpIndex(jump);
+    if (index < 0) {
+      // 絞り込み（フォーマット・音質）と重なると 0 件になることがある
+      libraryView.pendingJump = null;
+      toast.info(`「${jump.initial}」で始まるものは見つかりませんでした`);
+      return;
+    }
+    // 一覧が描画され、高さが確定してからでないと正しい位置へ飛べない。
+    // requestAnimationFrame は画面が描画されていない状況（バックグラウンド
+    // タブなど）では呼ばれないため、タイマーで待つ。
+    const selector = JUMP_ITEM_SELECTOR;
+    setTimeout(() => {
+      const target = document.querySelectorAll(selector)[index];
+      if (!target) return;
+      libraryView.pendingJump = null;
+      const top = target.getBoundingClientRect().top + window.scrollY - stickyOffset() - 8;
+      window.scrollTo({ top: Math.max(0, top), behavior: 'auto' });
+      flash(target);
+    }, 0);
+  }
+
+  /** 飛んだ先を一瞬光らせる。どこに着いたのかが分かるように。 */
+  function flash(element) {
+    element.classList.add('jump-target');
+    setTimeout(() => element.classList.remove('jump-target'), 1400);
   }
 
   const canUseInitialSearch = $derived(['albums', 'artists'].includes(libraryView.view));
+  /** 頭出し先を数えるときの 1 件分の要素。表示形式で変わる。 */
+  const JUMP_ITEM_SELECTOR = $derived(
+    libraryView.view === 'artists'
+      ? '.rows > li'
+      : libraryView.layout === 'list'
+        ? '.list > li'
+        : '.grid > .card',
+  );
   const entity = $derived(libraryView.view === 'artists' ? 'artists' : 'albums');
 </script>
 

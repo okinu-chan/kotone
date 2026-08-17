@@ -1,6 +1,19 @@
 <script>
-  /** 汎用モーダル。背景タップまたは Esc で閉じる。 */
-  let { open = $bindable(false), title = '', children, footer } = $props();
+  /**
+   * 汎用モーダル。背景タップまたは Esc で閉じる。
+   *
+   * ``dismissOnTap`` を付けると、ウインドウ自体をタップしても閉じる。
+   * 読むだけのウインドウ向け。隅の ✕ まで指を運ぶのは、片手で持っている
+   * ときに移動が大きいため（入力があるウインドウでは誤操作になるので既定は
+   * オフ）。
+   */
+  let {
+    open = $bindable(false),
+    title = '',
+    dismissOnTap = false,
+    children,
+    footer,
+  } = $props();
 
   function onKeydown(event) {
     if (event.key === 'Escape') open = false;
@@ -12,10 +25,25 @@
 {#if open}
   <div class="backdrop">
     <button class="scrim" onclick={() => (open = false)} aria-label="閉じる" tabindex="-1"></button>
-    <div class="sheet" role="dialog" aria-modal="true" aria-label={title}>
+    <!-- タップで閉じる版は、キーボードからは Esc と背景ボタンで閉じられる。
+         中身が本文（p/dl）なので button では包めず、div にハンドラを付ける -->
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="sheet"
+      class:tappable={dismissOnTap}
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      onclick={dismissOnTap ? () => (open = false) : null}
+    >
       <header>
         <h2 class="truncate">{title}</h2>
-        <button class="close" onclick={() => (open = false)} aria-label="閉じる">✕</button>
+        {#if dismissOnTap}
+          <span class="hint dim">タップで閉じる</span>
+        {:else}
+          <button class="close" onclick={() => (open = false)} aria-label="閉じる">✕</button>
+        {/if}
       </header>
       <div class="body">{@render children?.()}</div>
       {#if footer}
@@ -68,6 +96,10 @@
     font-size: 16px;
   }
 
+  .sheet.tappable {
+    cursor: pointer;
+  }
+
   .close {
     display: grid;
     place-items: center;
@@ -76,6 +108,11 @@
     flex: none;
     border-radius: 50%;
     color: var(--text-muted);
+  }
+
+  .hint {
+    flex: none;
+    font-size: var(--fs-sm);
   }
 
   .body {

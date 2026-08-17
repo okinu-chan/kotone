@@ -248,8 +248,13 @@ class LibraryViewState {
   view = $state('albums');
   sort = $state('album');
   layout = $state('grid');
-  initial = $state(null);
-  initialGroup = $state(null);
+  /**
+   * イニシャルサーチで選ばれた頭文字（{ initial, group, by }）。
+   *
+   * 絞り込みではなく頭出しなので、一覧そのものは全件のまま。描画が済んだら
+   * 画面側がその位置までスクロールして、この値を捨てる。
+   */
+  pendingJump = $state(null);
   /**
    * 頭文字を引く対象（'artist' | 'album'）。
    *
@@ -279,9 +284,6 @@ class LibraryViewState {
     return [
       this.view,
       this.sort,
-      this.initial ?? '',
-      this.initialGroup ?? '',
-      this.initialBy,
       this.codec ?? '',
       this.quality ?? '',
     ].join('|');
@@ -293,13 +295,8 @@ class LibraryViewState {
 
   /** 適用中の絞り込み条件（チップ表示用）。 */
   get activeFilters() {
+    // 頭文字は絞り込みではなく頭出しなので、チップには出さない
     const chips = [];
-    if (this.initial) {
-      // どちらの名前で引いたかを添える（同じ「か」でも結果が違うため）
-      const target =
-        this.view === 'albums' ? (this.initialBy === 'artist' ? 'アーティスト' : 'アルバム') : '';
-      chips.push({ key: 'initial', label: `${target}頭文字「${this.initial}」` });
-    }
     if (this.quality) {
       const labels = { hires: 'ハイレゾ', cd: 'CD 品質', dsd: 'DSD' };
       chips.push({ key: 'quality', label: labels[this.quality] ?? this.quality });
@@ -311,10 +308,7 @@ class LibraryViewState {
   }
 
   remove(key) {
-    if (key === 'initial') {
-      this.initial = null;
-      this.initialGroup = null;
-    } else if (key === 'quality') {
+    if (key === 'quality') {
       this.quality = null;
     } else if (key === 'codec') {
       this.codec = null;
@@ -322,10 +316,9 @@ class LibraryViewState {
   }
 
   clearFilter() {
-    this.initial = null;
-    this.initialGroup = null;
     this.codec = null;
     this.quality = null;
+    this.pendingJump = null;
     this.scrollY = 0;
   }
 }

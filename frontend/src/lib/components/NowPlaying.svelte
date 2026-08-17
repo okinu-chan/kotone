@@ -292,8 +292,9 @@
   {/if}
 </section>
 
-<!-- 長いタイトルの全文表示（スクロールを待たずに読めるように） -->
-<Modal bind:open={fullTitleOpen} title="曲名">
+<!-- 長いタイトルの全文表示（スクロールを待たずに読めるように）。
+     読むだけなので、どこをタップしても閉じる -->
+<Modal bind:open={fullTitleOpen} title="曲名" dismissOnTap>
   <p class="full-title">{track?.title ?? ''}</p>
   {#if track}
     <dl class="full-meta">

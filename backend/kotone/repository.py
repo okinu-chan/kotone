@@ -40,6 +40,10 @@ SELECT
     al.year, al.release_date, al.added_at, al.is_compilation, al.directory,
     aa.id   AS album_artist_id,
     aa.name AS album_artist,
+    -- イニシャルサーチの頭出し先を画面側で探すために返す。アルバム
+    -- アーティストが決まらないアルバムは「#」に寄せる（_ARTIST_INITIAL と同じ扱い）
+    COALESCE(aa.initial, '#')            AS album_artist_initial,
+    COALESCE(aa.initial_group, 'latin')  AS album_artist_initial_group,
     art.source_hash AS artwork_hash,
     (SELECT COUNT(*) FROM tracks tr WHERE tr.album_id = al.id) AS track_count,
     (SELECT COALESCE(SUM(tr.duration), 0) FROM tracks tr WHERE tr.album_id = al.id)
