@@ -80,6 +80,8 @@
     touchStart = null;
     // 縦スクロールとの誤爆を避けるため、横方向が明確に優位なときだけ反応する
     if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.8) return;
+    // 終端では曲送りを受け付けない（指が滑っただけで再生が止まらないように）
+    if (dx < 0 && !player.canNext) return;
     player.command(() => (dx < 0 ? api.next() : api.previous()));
   }
 
@@ -236,7 +238,12 @@
       {/if}
     </button>
 
-    <button class="skip" onclick={() => player.command(api.next)} aria-label="次の曲">
+    <button
+      class="skip"
+      onclick={() => player.command(api.next)}
+      disabled={!player.canNext}
+      aria-label="次の曲"
+    >
       <svg viewBox="0 0 24 24" fill="currentColor"
         ><path d="M15 6h2v12h-2zM6 6l8.5 6L6 18z" /></svg
       >
@@ -542,9 +549,16 @@
       0 0 0 1px rgb(255 255 255 / 0.06);
   }
 
-  .skip:hover {
+  .skip:hover:not(:disabled) {
     border-color: var(--accent);
     box-shadow: 0 0 16px -1px var(--accent-glow);
+  }
+
+  /* 終端では曲送りできない。光彩を落として「押しても効かない」ことを見せる */
+  .skip:disabled {
+    opacity: 0.32;
+    box-shadow: none;
+    cursor: default;
   }
 
   .transport svg {

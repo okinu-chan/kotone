@@ -471,3 +471,98 @@ async def test_song_change_is_still_broadcast_during_a_fade(db, settings, fast_f
     await ctrl._on_mpd_event({"player", "mixer"})
     assert broadcasts == 1
     await ctrl._fade_task
+
+
+# ------------------------------------------ 終端での曲送り（スコープからの脱落防止）
+
+
+class QueueMPD(FakeMPD):
+    """キューの位置と長さを持つフェイク（曲送りの可否を試すため）。"""
+
+    def __init__(self, position: int = 0, length: int = 3) -> None:
+        super().__init__(state="play")
+        self.position = position
+        self.length = length
+        self.nexted = 0
+
+    async def status(self) -> dict:
+        base = await super().status()
+        base.update({"song": self.position, "playlistlength": self.length})
+        return base
+
+    async def next(self) -> None:
+        self.nexted += 1
+        self.position += 1
+
+
+def _controller(mpd, db, settings) -> PlaybackController:
+    return PlaybackController(mpd, db, FakeRepo({}), settings, EventBus())
+
+
+async def test_next_is_ignored_at_the_end_of_the_scope(db, settings) -> None:
+    """リピートもシャッフルも無い状態では、終端で曲送りを受け付けない。
+
+    受け付けると MPD がキューを使い切って停止し、画面は「再生していません」に
+    なる。聴いていたアルバムへ戻る手がかりまで消えてしまう。
+    """
+    mpd = QueueMPD(position=2, length=3)
+    ctrl = _controller(mpd, db, settings)
+
+    await ctrl.next()
+
+    assert mpd.nexted == 0
+    assert mpd.position == 2
+
+
+async def test_next_works_before_the_end(db, settings) -> None:
+    mpd = QueueMPD(position=1, length=3)
+    ctrl = _controller(mpd, db, settings)
+
+    await ctrl.next()
+
+    assert mpd.nexted == 1
+
+
+@pytest.mark.parametrize("repeat", ["one", "range"])
+async def test_repeat_still_advances_at_the_end(db, settings, repeat: str) -> None:
+    """リピート中は巻き戻るので、終端でも曲送りできる。"""
+    mpd = QueueMPD(position=2, length=3)
+    ctrl = _controller(mpd, db, settings)
+    ctrl.repeat_mode = repeat
+
+    await ctrl.next()
+
+    assert mpd.nexted == 1
+
+
+@pytest.mark.parametrize("order", ["shuffle", "random"])
+async def test_shuffle_and_random_still_advance(db, settings, order: str) -> None:
+    """シャッフル・ランダムでは次の曲が用意されるので受け付ける。"""
+    mpd = QueueMPD(position=2, length=3)
+    ctrl = _controller(mpd, db, settings)
+    ctrl.order_mode = order
+
+    await ctrl.next()
+
+    assert mpd.nexted == 1
+
+
+async def test_next_allowed_while_stopped(db, settings) -> None:
+    """停止中は終端と見なさない（再生の開始を邪魔しない）。"""
+    mpd = QueueMPD(position=2, length=3)
+    mpd.state = "stop"
+    ctrl = _controller(mpd, db, settings)
+
+    await ctrl.next()
+
+    assert mpd.nexted == 1
+
+
+async def test_single_track_scope_does_not_advance(db, settings) -> None:
+    """1 曲だけのスコープでも同じ（position 0 が終端になる）。"""
+    mpd = QueueMPD(position=0, length=1)
+    ctrl = _controller(mpd, db, settings)
+
+    await ctrl.next()
+
+    assert mpd.nexted == 0

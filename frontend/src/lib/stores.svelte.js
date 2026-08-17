@@ -21,6 +21,14 @@ class PlayerStore {
   playing = $derived(this.state.state === 'play');
   elapsed = $derived(this.seeking ? this.localElapsed : this.state.elapsed || 0);
   duration = $derived(this.state.duration || this.track?.duration || 0);
+  /**
+   * 曲送りできるか。
+   *
+   * リピートもシャッフルも設定していない状態で終端から進めると再生が止まり、
+   * 聴いていたアルバムへ戻る手がかりも消える。サーバー側で受け付けないので、
+   * 画面側もボタンを無効に見せて「効かない」ことを伝える。
+   */
+  canNext = $derived(this.state.can_next !== false);
 
   connect() {
     this.#openSocket();

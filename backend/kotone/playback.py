@@ -305,12 +305,40 @@ class PlaybackController:
         await self.mpd.stop()
 
     async def next(self) -> None:
-        if self.order_mode == "random":
-            # キューには次の 1 曲が入っているので通常の next で進める。
-            # 進んだ後のイベントで補充される。
-            await self.mpd.next()
+        """次の曲へ進む。終端では何もしない。
+
+        リピートもシャッフルも設定していない状態で最後の曲から進めると、MPD は
+        キューを使い切って再生を止める。画面は「再生していません」になり、
+        聴いていたアルバムへ戻る手がかりまで消えてしまう。アートワークの
+        スワイプは指が滑っただけでも発生するので、終端では受け付けない。
+        """
+        if await self.at_queue_end():
             return
+        # ランダム（重複あり）ではキューに次の 1 曲が入っているので、通常の
+        # next で進める。進んだ後のイベントで補充される。
         await self.mpd.next()
+
+    async def at_queue_end(self, status: dict[str, Any] | None = None) -> bool:
+        """次に進む先が無い状態か（曲送りを受け付けない条件）。
+
+        リピート中なら巻き戻るので終端ではなく、ランダム（重複あり）なら
+        次の曲が足されるので尽きない。シャッフルは MPD の random に任せて
+        いるため、ここでは終端と見なさない。
+
+        ``status`` を渡せば MPD への問い合わせを省ける（状態の配信は頻繁に
+        起きるので、そのたびに status を引き直さない）。
+        """
+        if self.repeat_mode != "off" or self.order_mode != "normal":
+            return False
+        if status is None:
+            status = await self.mpd.status()
+        if status.get("state") == "stop":
+            return False    # 止まっているなら再生開始を邪魔しない
+        position = _int_or_none(status.get("song"))
+        length = _int_or_none(status.get("playlistlength"))
+        if position is None or length is None:
+            return False
+        return position >= length - 1
 
     async def previous(self) -> None:
         status = await self.mpd.status()
@@ -679,6 +707,7 @@ class PlaybackController:
                 "volume": self.user_volume,
                 "volume_control": self.settings.get("volume_control"),
                 "state": "stop",
+                "can_next": False,
             }
         status = await self.mpd.status()
         song = await self.mpd.current_song()
@@ -699,6 +728,9 @@ class PlaybackController:
             "scope": self.scope.as_dict(),
             "queue_length": _int_or_none(status.get("playlistlength")) or 0,
             "queue_position": _int_or_none(status.get("song")),
+            # 終端では曲送りを受け付けない。押しても効かない理由が分かるよう、
+            # 画面側でボタンを無効に見せるために返す
+            "can_next": not await self.at_queue_end(status),
             "audio": _parse_audio_format(status.get("audio")),
             "bitrate": _int_or_none(status.get("bitrate")),
             "track": track,

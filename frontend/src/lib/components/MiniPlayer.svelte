@@ -33,7 +33,12 @@
         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5l12 7-12 7z" /></svg>
       {/if}
     </button>
-    <button class="control" onclick={() => player.command(api.next)} aria-label="次の曲">
+    <button
+      class="control"
+      onclick={() => player.command(api.next)}
+      disabled={!player.canNext}
+      aria-label="次の曲"
+    >
       <svg viewBox="0 0 24 24" fill="currentColor"
         ><path d="M15 6h2v12h-2zM6 6l8.5 6L6 18z" /></svg
       >
@@ -106,6 +111,11 @@
     height: var(--tap);
     border-radius: 50%;
     flex: none;
+  }
+
+  .control:disabled {
+    opacity: 0.32;
+    cursor: default;
   }
 
   .control svg {
