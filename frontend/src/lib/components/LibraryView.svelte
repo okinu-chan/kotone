@@ -159,9 +159,16 @@
   function onInitialSelected(event) {
     if (event.by) libraryView.initialBy = event.by;
     if (libraryView.view === 'albums') {
-      // 並び順が頭文字の対象と食い違っていると「位置」が意味を持たない
-      // （アルバム名順の一覧でアーティストの「か」は散らばっている）
-      libraryView.sort = event.by === 'album' ? 'album' : 'artist';
+      if (event.by === 'artist') {
+        // アーティスト名で引いたなら、アーティスト名の一覧へ移って頭出しする。
+        // アルバムの一覧に留まると、同じ頭文字のアーティストが何人いるのか、
+        // 目的の人がどこにいるのかが分からない。
+        libraryView.view = 'artists';
+      } else {
+        // アルバム名で引くなら、並び順もアルバム名にそろえる
+        // （アーティスト順の一覧では、同じ頭文字のアルバムが散らばっている）
+        libraryView.sort = 'album';
+      }
     }
     libraryView.pendingJump = { initial: event.initial, group: event.group, by: event.by };
     router.forgetScroll('/library');
@@ -169,10 +176,17 @@
 
   /** 一覧の中で、頭出し先にあたる要素の番号。見つからなければ -1。 */
   function findJumpIndex(jump) {
+    // タブから来た「いま聴いているアルバムへ」の頭出し
+    if (jump.albumId !== undefined) {
+      return libraryView.view === 'albums'
+        ? albums.findIndex((a) => a.id === jump.albumId)
+        : -1;
+    }
     const matches = (initial, group) => initial === jump.initial && group === jump.group;
     if (libraryView.view === 'artists') {
       return artists.findIndex((a) => matches(a.initial, a.initial_group));
     }
+    if (libraryView.view !== 'albums') return -1;
     if (jump.by === 'album') {
       return albums.findIndex((a) => matches(a.initial, a.initial_group));
     }
@@ -193,9 +207,13 @@
     if (!jump) return;
     const index = findJumpIndex(jump);
     if (index < 0) {
-      // 絞り込み（フォーマット・音質）と重なると 0 件になることがある
       libraryView.pendingJump = null;
-      toast.info(`「${jump.initial}」で始まるものは見つかりませんでした`);
+      // アルバムへの頭出しは、見つからなくても黙って先頭のままでよい
+      // （何も再生していない、別のタブを見ている、など）
+      if (jump.initial) {
+        // 絞り込み（フォーマット・音質）と重なると 0 件になることがある
+        toast.info(`「${jump.initial}」で始まるものは見つかりませんでした`);
+      }
       return;
     }
     // 一覧が描画され、高さが確定してからでないと正しい位置へ飛べない。

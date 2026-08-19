@@ -13,6 +13,7 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 from kotone.api.deps import Ctx
+from kotone.mpdclient import MPDUnavailable
 from kotone.playlists import PlaylistError
 
 router = APIRouter(prefix="/playlists", tags=["playlists"])
@@ -97,8 +98,22 @@ def delete(ctx: Ctx, playlist_id: int) -> None:
     ctx.playlists.delete(playlist_id)
 
 
+async def _sync_player(ctx: Ctx, playlist_id: int) -> None:
+    """このプレイリストを再生中なら、MPD のキューを新しい中身に合わせる。
+
+    合わせないと、消したはずの曲が次に鳴る。
+    """
+    if not ctx.mpd.connected:
+        return
+    try:
+        if await ctx.player.resync_scope("playlist", playlist_id):
+            await ctx.player.broadcast_state()
+    except MPDUnavailable:
+        pass   # 再生していなくてもプレイリストの編集は成立させる
+
+
 @router.post("/{playlist_id}/tracks")
-def add_tracks(ctx: Ctx, playlist_id: int, body: AddTracksRequest) -> dict[str, Any]:
+async def add_tracks(ctx: Ctx, playlist_id: int, body: AddTracksRequest) -> dict[str, Any]:
     """曲・アルバム・アーティスト単位でまとめて追加する。"""
     track_ids = list(body.track_ids)
     if body.album_id is not None:
@@ -109,33 +124,37 @@ def add_tracks(ctx: Ctx, playlist_id: int, body: AddTracksRequest) -> dict[str, 
         ctx.playlists.add_tracks(playlist_id, track_ids, body.position)
     except PlaylistError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await _sync_player(ctx, playlist_id)
     return ctx.repo.get_playlist(playlist_id) or {}
 
 
 @router.post("/{playlist_id}/remove")
-def remove_tracks(ctx: Ctx, playlist_id: int, body: RemoveRequest) -> dict[str, Any]:
+async def remove_tracks(ctx: Ctx, playlist_id: int, body: RemoveRequest) -> dict[str, Any]:
     try:
         ctx.playlists.remove_at(playlist_id, body.positions)
     except PlaylistError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await _sync_player(ctx, playlist_id)
     return ctx.repo.get_playlist(playlist_id) or {}
 
 
 @router.post("/{playlist_id}/move")
-def move_track(ctx: Ctx, playlist_id: int, body: MoveRequest) -> dict[str, Any]:
+async def move_track(ctx: Ctx, playlist_id: int, body: MoveRequest) -> dict[str, Any]:
     try:
         ctx.playlists.move(playlist_id, body.from_position, body.to_position)
     except PlaylistError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await _sync_player(ctx, playlist_id)
     return ctx.repo.get_playlist(playlist_id) or {}
 
 
 @router.post("/{playlist_id}/reorder")
-def reorder(ctx: Ctx, playlist_id: int, body: ReorderRequest) -> dict[str, Any]:
+async def reorder(ctx: Ctx, playlist_id: int, body: ReorderRequest) -> dict[str, Any]:
     try:
         ctx.playlists.reorder(playlist_id, body.track_ids)
     except PlaylistError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await _sync_player(ctx, playlist_id)
     return ctx.repo.get_playlist(playlist_id) or {}
 
 

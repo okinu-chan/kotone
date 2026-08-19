@@ -221,6 +221,10 @@
       </svg>
     </button>
 
+    <!-- 音量は操作ボタンと同じ並びに置く。下のほうに置くと、縦長の画面では
+         スクロールしないと届かない（iPhone 15 Pro / Safari で確認） -->
+    <VolumeControl placement="up" />
+
     <button class="skip" onclick={() => player.command(api.previous)} aria-label="前の曲">
       <svg viewBox="0 0 24 24" fill="currentColor"
         ><path d="M7 6h2v12H7zm2.5 6L18 6v12z" /></svg
@@ -275,10 +279,7 @@
     <span class="sep">·</span>{player.state.scope?.label ?? ''}
   </p>
 
-  <!-- 音量はスピーカーのアイコンから。アンプ側で取る構成では出ない -->
-  <div class="volume-row">
-    <VolumeControl placement="down" />
-  </div>
+
 
   <div class="extras">
     {#if track?.album_id}
@@ -626,11 +627,7 @@
     font-size: var(--fs-sm);
   }
 
-  /* 音量アイコンは中央に置く（縦バーはアイコンの真下に出る） */
-  .volume-row {
-    display: flex;
-    justify-content: center;
-  }
+
 
   /* 副次的な操作。狭い画面では縦に積み、広ければ横に並べる */
   .extras {

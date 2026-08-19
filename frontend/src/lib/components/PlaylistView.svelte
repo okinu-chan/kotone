@@ -32,6 +32,15 @@
   /** プレイリストへ追加するときの対象（1 曲でも複数選択でも同じ経路を使う） */
   let addTrackIds = $state([]);
 
+  /**
+   * 削除の確認。
+   *
+   * 「⋯」を開いてすぐ下に削除があるので、押し間違いで消えてしまう。
+   * 何を消すのかを見せてから確定させる。
+   */
+  let confirmOpen = $state(false);
+  let pendingRemoval = $state({ positions: [], titles: [] });
+
   /** 複数選択モード。鍵は曲 id ではなく並び順（同じ曲が複数回入りうる） */
   let selecting = $state(false);
   let selectedPositions = $state(new Set());
@@ -119,11 +128,23 @@
     };
   }
 
-  async function removeOne() {
-    const position = menuTrack?.position;
+  function removeOne() {
+    const track = menuTrack;
     menuOpen = false;
-    if (position === undefined) return;
-    await removeAt([position]);
+    if (!track) return;
+    askRemoval([track.position], [track.title]);
+  }
+
+  function askRemoval(positions, titles) {
+    pendingRemoval = { positions, titles };
+    confirmOpen = true;
+  }
+
+  async function confirmRemoval() {
+    const { positions } = pendingRemoval;
+    confirmOpen = false;
+    cancelSelecting();
+    await removeAt(positions);
   }
 
   function addOne() {
@@ -166,11 +187,13 @@
       : new Set(tracks.map((t) => t.position));
   }
 
-  async function removeSelected() {
+  function removeSelected() {
     const positions = [...selectedPositions];
     if (positions.length === 0) return;
-    cancelSelecting();
-    await removeAt(positions);
+    const titles = tracks
+      .filter((t) => selectedPositions.has(t.position))
+      .map((t) => t.title);
+    askRemoval(positions, titles);
   }
 
   function addSelected() {
@@ -246,6 +269,24 @@
     </ul>
     {#snippet footer()}
       <button class="ghost" onclick={() => (menuOpen = false)}>閉じる</button>
+    {/snippet}
+  </Modal>
+
+  <!-- 削除の確認。消える曲名をそのまま見せる -->
+  <Modal bind:open={confirmOpen} title="プレイリストから削除しますか？">
+    <p class="confirm-lead">この {pendingRemoval.positions.length} 曲をプレイリストから外します。</p>
+    <ul class="confirm-list">
+      {#each pendingRemoval.titles.slice(0, 12) as title, index (index)}
+        <li class="truncate">{title}</li>
+      {/each}
+    </ul>
+    {#if pendingRemoval.titles.length > 12}
+      <p class="confirm-more dim">ほか {pendingRemoval.titles.length - 12} 曲</p>
+    {/if}
+    <p class="confirm-note dim">音源そのものは消えません。</p>
+    {#snippet footer()}
+      <button class="ghost" onclick={() => (confirmOpen = false)}>取消</button>
+      <button class="danger" onclick={confirmRemoval}>削除</button>
     {/snippet}
   </Modal>
 
@@ -366,5 +407,29 @@
 
   .menu-list .danger-text {
     color: var(--danger);
+  }
+
+  .confirm-lead {
+    margin: 0 0 10px;
+    font-size: var(--fs-lg);
+  }
+
+  .confirm-list {
+    margin: 0;
+    max-height: 40vh;
+    overflow-y: auto;
+  }
+
+  .confirm-list li {
+    padding: 6px 0;
+    font-size: var(--fs-md);
+    color: var(--text-muted);
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  }
+
+  .confirm-more,
+  .confirm-note {
+    margin: 10px 0 0;
+    font-size: var(--fs-sm);
   }
 </style>

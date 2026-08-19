@@ -300,6 +300,76 @@ class PlaybackController:
         await self.broadcast_state()
         return self.state_snapshot()
 
+    async def resync_scope(self, kind: str, scope_id: str | int) -> bool:
+        """再生中の範囲の中身が変わったら、MPD のキューを合わせ直す。
+
+        プレイリストを聴いている最中に曲を足したり消したり並べ替えたりしても、
+        MPD のキューは読み込んだときのまま。画面に出ている一覧と実際に鳴る
+        順番が食い違い、次の曲が消したはずの曲になる。
+
+        いま鳴っている曲がまだ範囲に残っていれば、その曲は触らずに周りだけ
+        入れ替える（曲を消しただけで音が途切れないように）。鳴っている曲
+        自体が消された場合は作り直すしかないので、その位置から続ける。
+
+        入れ替えたときだけ True を返す。
+        """
+        if self.scope.kind != kind or str(self.scope.id) != str(scope_id):
+            return False   # 別の範囲を聴いているなら触らない
+
+        async with self._lock:
+            tracks = await asyncio.to_thread(self.repo.resolve_scope, kind, scope_id)
+            paths = [t["path"] for t in tracks]
+            # ランダム（重複あり）はキューに 2 曲しか持たない。抽選の元だけ替える
+            self._random.pool = paths
+            if self.order_mode == "random":
+                return True
+
+            queue = await self.mpd.queue()
+            if [item.get("file") for item in queue] == paths:
+                return False   # 中身が同じなら触らない（並び替え以外の変更など）
+
+            status = await self.mpd.status()
+            song = await self.mpd.current_song()
+            current_path = song.get("file")
+            current_id = status.get("songid")
+            was_playing = status.get("state") == "play"
+
+            if not paths:
+                await self.mpd.clear()
+                return True
+
+            if current_path in paths and current_id is not None:
+                await self._rebuild_around_current(queue, paths, current_path, current_id)
+            else:
+                # 鳴っている曲が範囲から消えた。作り直して、その位置から続ける
+                position = _int_or_none(status.get("song")) or 0
+                await self.mpd.clear()
+                await self.mpd.add_many(paths)
+                await self.mpd.play(min(position, len(paths) - 1))
+                if not was_playing:
+                    await self.mpd.pause(True)
+            return True
+
+    async def _rebuild_around_current(
+        self, queue: list[dict[str, Any]], paths: list[str], current_path: str, current_id: str
+    ) -> None:
+        """再生中の曲だけ残して、その周りを新しい並びに入れ替える。
+
+        MPD は再生中でない曲をキューから消しても鳴っている音に影響しない。
+        消して足すだけなので、曲の変わり目を待たずに反映できる。
+        """
+        for item in queue:
+            song_id = item.get("id")
+            if song_id is not None and str(song_id) != str(current_id):
+                await self.mpd.delete_id(int(song_id))
+
+        # 残った 1 曲を挟むように、前から順に入れていく
+        keep = paths.index(current_path)
+        for index, path in enumerate(paths):
+            if index == keep:
+                continue
+            await self.mpd.add_id(path, position=index)
+
     async def play_tracks(self, track_ids: list[int], *, start_index: int = 0) -> None:
         """任意の曲リストを直接キューへ入れて再生する（検索結果からの再生など）。"""
         async with self._lock:

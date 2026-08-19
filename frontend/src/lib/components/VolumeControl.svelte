@@ -12,7 +12,12 @@
   import { api } from '../api.js';
   import { player } from '../stores.svelte.js';
 
-  /** 縦バーを上に出すか下に出すか（ミニプレーヤーは画面下端にあるので上） */
+  /**
+   * 縦バーを出す向き。既定は上。
+   *
+   * 下に出すと、画面下端に近い場所（ミニプレーヤー、再生中画面の操作列）では
+   * バーが画面外へはみ出す。上なら常に見える。
+   */
   let { placement = 'up' } = $props();
 
   let open = $state(false);

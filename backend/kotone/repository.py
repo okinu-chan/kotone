@@ -173,6 +173,14 @@ class LibraryRepository:
             clauses.append("(ar.name LIKE ? OR ar.reading LIKE ? OR ar.sort_key LIKE ?)")
             like = f"%{query}%"
             params.extend([like, like, like])
+        # 曲を 1 つも持たないアーティストは一覧に出さない。
+        #
+        # ALBUMARTIST タグだけに出てくる名前（「765PRO ALLSTARS」など）が
+        # 「0 曲」として並び、目的の名前を探しにくくなる。タグを直したあとの
+        # 行き場を失った名前も、再スキャンを待たずにここで消える。
+        clauses.append(
+            "EXISTS (SELECT 1 FROM track_artists ta WHERE ta.artist_id = ar.id)"
+        )
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         order = ARTIST_SORTS.get(sort, ARTIST_SORTS["artist"])
         sql = f"""
@@ -312,6 +320,16 @@ class LibraryRepository:
                 f"SELECT {_ARTIST_INITIAL} AS initial, COUNT(*) AS count "
                 "FROM albums al LEFT JOIN artists aa ON aa.id = al.album_artist_id "
                 f"WHERE {_ARTIST_INITIAL_GROUP} = ? GROUP BY 1",
+                (group,),
+            )
+        elif table == "artists":
+            # 一覧と同じ条件で数える（曲を持たない名前は出さない）。ここがずれると
+            # 件数のあるセルを押しても何も無い、ということが起きる
+            rows = self.db.query(
+                "SELECT ar.initial AS initial, COUNT(*) AS count FROM artists ar "
+                "WHERE ar.initial_group = ? AND EXISTS "
+                "  (SELECT 1 FROM track_artists ta WHERE ta.artist_id = ar.id) "
+                "GROUP BY ar.initial",
                 (group,),
             )
         else:

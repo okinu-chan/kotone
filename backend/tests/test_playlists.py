@@ -177,3 +177,47 @@ def test_reorder_ignores_unknown_ids(service: PlaylistService, db: Database) -> 
     first = service.create("A")
     service.reorder_playlists([9999, first])
     assert [p["name"] for p in LibraryRepository(db).list_playlists()] == ["A"]
+
+
+# ------------------------------------------- 一覧に出すアーティスト（要件 3.6）
+
+
+def test_album_artist_only_names_are_hidden(db: Database) -> None:
+    """ALBUMARTIST にしか出てこない名前を、アーティスト一覧に出さないこと。
+
+    「765PRO ALLSTARS」のような名前が「0 曲」として並び、目的の名前を
+    探しにくくなる。アルバム側の表示には引き続き使う。
+    """
+    repo = LibraryRepository(db)
+    solo = db.execute("INSERT INTO artists (name, sort_key) VALUES ('歌う人', 'うたうひと')")
+    group = db.execute("INSERT INTO artists (name, sort_key) VALUES ('団体名', 'たんたいめい')")
+    album = db.execute(
+        "INSERT INTO albums (album_key, name, album_artist_id) VALUES ('k', 'A', ?)",
+        (group.lastrowid,),
+    )
+    track = db.execute(
+        "INSERT INTO tracks (path, title, album_id) VALUES ('a.flac', '曲', ?)",
+        (album.lastrowid,),
+    )
+    db.execute(
+        "INSERT INTO track_artists (track_id, artist_id, role) VALUES (?, ?, 'artist')",
+        (track.lastrowid, solo.lastrowid),
+    )
+    db.commit()
+
+    assert [a["name"] for a in repo.list_artists()] == ["歌う人"]
+    # アルバムのアルバムアーティストとしては残る
+    assert repo.list_albums()[0]["album_artist"] == "団体名"
+
+
+def test_artist_initial_counts_match_the_list(db: Database) -> None:
+    """頭文字の件数が一覧と一致すること（押しても 0 件、を防ぐ）。"""
+    repo = LibraryRepository(db)
+    db.execute(
+        "INSERT INTO artists (name, sort_key, initial, initial_group) "
+        "VALUES ('曲なし', 'きよくなし', 'き', 'kana')"
+    )
+    db.commit()
+
+    counts = {i["initial"]: i["count"] for i in repo.initials("artists", "kana")}
+    assert counts["き"] == 0

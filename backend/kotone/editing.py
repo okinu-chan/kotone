@@ -172,6 +172,29 @@ class EditingService:
                 genre_ids = [self._get_or_create_genre(n) for n in genre_names]
                 self._set_track_genres(track_id, genre_ids)
 
+        # 付け替えで曲が 1 つも無くなった名前を、その場で片付ける。
+        # 次のスキャンまで残しておくと、直したはずの名前が「0 曲」で
+        # 一覧に居座る（18,000 曲の再スキャンを強いるほどの話ではない）。
+        self.prune_orphans()
+
+    def prune_orphans(self) -> None:
+        """曲が 1 つも紐づかなくなったアーティスト / ジャンルを削除する。
+
+        タグを 1 曲直しただけでも、そこにしか出てこなかった名前は行き場を
+        失う。ライブラリ全体の再スキャンを待たずに消す（対象は付け替えの
+        あった行だけなので、DB への負担は小さい）。
+        """
+        with self.db.transaction() as conn:
+            conn.execute(
+                "DELETE FROM artists WHERE id NOT IN "
+                "(SELECT artist_id FROM track_artists) "
+                "AND id NOT IN (SELECT album_artist_id FROM albums "
+                "               WHERE album_artist_id IS NOT NULL)"
+            )
+            conn.execute(
+                "DELETE FROM genres WHERE id NOT IN (SELECT genre_id FROM track_genres)"
+            )
+
     def unlock_track(self, track_id: int) -> None:
         """手動修正を解除し、次回スキャンで自動生成値に戻す。"""
         self.db.execute(
