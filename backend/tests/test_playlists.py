@@ -134,3 +134,46 @@ def test_import_avoids_name_collision(service: PlaylistService, tmp_path: Path) 
 
     playlist = Repo(service.db).get_playlist(result["playlist_id"])
     assert playlist["name"] == "重複名 (2)"
+
+
+# ------------------------------------------------- プレイリスト自体の並び順
+
+
+def test_new_playlists_go_to_the_end(service: PlaylistService, db: Database) -> None:
+    """作った順に末尾へ積まれること（読み順に割り込まない）。"""
+    service.create("さくら")
+    service.create("あさひ")
+    service.create("ゆうひ")
+
+    names = [p["name"] for p in LibraryRepository(db).list_playlists()]
+    assert names == ["さくら", "あさひ", "ゆうひ"]
+
+
+def test_reorder_playlists(service: PlaylistService, db: Database) -> None:
+    first = service.create("A")
+    second = service.create("B")
+    third = service.create("C")
+
+    service.reorder_playlists([third, first, second])
+
+    assert [p["name"] for p in LibraryRepository(db).list_playlists()] == ["C", "A", "B"]
+
+
+def test_reorder_keeps_unlisted_playlists(service: PlaylistService, db: Database) -> None:
+    """画面に出ていなかったプレイリストが消えないこと。
+
+    別の端末で増えた分を渡し忘れても、末尾に残るだけで落ちない。
+    """
+    first = service.create("A")
+    second = service.create("B")
+    service.create("C")
+
+    service.reorder_playlists([second, first])
+
+    assert [p["name"] for p in LibraryRepository(db).list_playlists()] == ["B", "A", "C"]
+
+
+def test_reorder_ignores_unknown_ids(service: PlaylistService, db: Database) -> None:
+    first = service.create("A")
+    service.reorder_playlists([9999, first])
+    assert [p["name"] for p in LibraryRepository(db).list_playlists()] == ["A"]

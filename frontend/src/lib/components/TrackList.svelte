@@ -1,6 +1,7 @@
 <script>
   /** 曲一覧。タップでその曲から再生（要件 3.4 / 3.6）。 */
   import { formatTime } from '../format.js';
+  import { beginDrag } from '../reorder.js';
   import { player } from '../stores.svelte.js';
   import AlbumArt from './AlbumArt.svelte';
 
@@ -19,26 +20,60 @@
      * 選択の切り替えになる（プレイリストへ入れる曲を選ぶときに使う）。
      */
     selectable = false,
-    /** 選択済みの曲 id（Set）。1 つの一覧に同じ曲は並ばない前提で id を使う */
+    /** 選択済みの行の鍵（Set）。何を鍵にするかは selectKey で決める */
     selectedIds = new Set(),
+    /**
+     * 行を識別する鍵。
+     *
+     * 既定は曲 id。プレイリストのように同じ曲が複数回並ぶ一覧では、id だと
+     * 1 つ選んだつもりが両方選ばれてしまうため、並び順の番号を渡す。
+     */
+    selectKey = (track) => track.id,
     ontoggleselect,
+    /** ドラッグで並び替えられるようにする（つまみを左端に出す） */
+    reorderable = false,
+    /** 1 マス動くたびに呼ぶ（手元の配列を動かす） */
+    onreorder,
+    /** 指を離したときに呼ぶ（ここで保存する） */
+    oncommit,
   } = $props();
 
   const currentPath = $derived(player.state.raw_file ?? null);
 </script>
 
-<ul class="tracks">
+<ul class="tracks" data-reorder-list={reorderable ? '' : undefined}>
   <!-- 同じ曲が複数回並ぶことがある（プレイリストへ同じアルバムを 2 回入れた、
        ランダム再生のキューで同じ曲が再抽選された、など）。曲 id で鍵を付けると
        重複してレンダリングごと落ち、読み込み中の表示のまま止まってしまう。
        行の識別子は「何番目か」なので index を鍵にする。 -->
   {#each tracks as track, index (index)}
     {@const active = track.path === currentPath}
-    {@const checked = selectable && selectedIds.has(track.id)}
+    {@const checked = selectable && selectedIds.has(selectKey(track, index))}
     <li class:active class:selected={checked}>
+      {#if reorderable}
+        <!-- つまみからだけ掴める。行のどこでも掴めると一覧をスクロールできない -->
+        <button
+          class="grip"
+          onpointerdown={(event) =>
+            beginDrag(event, {
+              itemSelector: '.tracks > li',
+              from: index,
+              onMove: (a, b) => onreorder?.(a, b),
+              onEnd: () => oncommit?.(),
+            })}
+          aria-label="ドラッグして並べ替え"
+          title="ドラッグして並べ替え"
+        >
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <circle cx="9" cy="6" r="1.6" /><circle cx="15" cy="6" r="1.6" />
+            <circle cx="9" cy="12" r="1.6" /><circle cx="15" cy="12" r="1.6" />
+            <circle cx="9" cy="18" r="1.6" /><circle cx="15" cy="18" r="1.6" />
+          </svg>
+        </button>
+      {/if}
       <button
         class="row"
-        onclick={() => (selectable ? ontoggleselect?.(track) : onplay?.(track, index))}
+        onclick={() => (selectable ? ontoggleselect?.(track, index) : onplay?.(track, index))}
         aria-pressed={selectable ? checked : undefined}
       >
         {#if selectable}
@@ -194,6 +229,37 @@
   .time {
     flex: none;
     font-size: var(--fs-sm);
+  }
+
+  /* 並び替えのつまみ。touch-action: none が無いと、指の動きが一覧の
+     スクロールに取られてドラッグが始まらない */
+  .grip {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    min-height: var(--tap);
+    flex: none;
+    color: var(--text-dim);
+    touch-action: none;
+    cursor: grab;
+  }
+
+  .grip:hover {
+    color: var(--text);
+  }
+
+  .grip svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  /* ドラッグ中は文字の選択を止める（掴んだまま動かすと選択されてしまう） */
+  .tracks.reordering {
+    user-select: none;
+  }
+
+  .tracks.reordering .grip {
+    cursor: grabbing;
   }
 
   .menu {

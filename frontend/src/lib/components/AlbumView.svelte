@@ -25,10 +25,9 @@
   /**
    * プレイリストへ入れる曲の選択。
    *
-   * 「プレイリストへ追加」を押すとまず選択モードに入る。アルバム 1 枚を
-   * まるごと入れたい場合が多いので、入った時点では全曲を選んだ状態にして
-   * おき、要らない曲を外す形にする（従来の「アルバムごと追加」がそのまま
-   * 通る）。
+   * 「プレイリストへ追加」を押すとまず選択モードに入る。入った時点では
+   * 何も選ばれていない状態にして、要る曲だけを拾ってもらう。1 枚まるごとは
+   * 「すべて選択」1 タップで済む。
    */
   let selecting = $state(false);
   let selectedIds = $state(new Set());
@@ -46,7 +45,7 @@
   const selectedTrackIds = $derived(allTrackIds.filter((id) => selectedIds.has(id)));
 
   function startSelecting() {
-    selectedIds = new Set(allTrackIds);
+    selectedIds = new Set();
     selecting = true;
   }
 

@@ -27,6 +27,10 @@ class RenameRequest(BaseModel):
     name: str
 
 
+class ReorderPlaylistsRequest(BaseModel):
+    playlist_ids: list[int]
+
+
 class AddTracksRequest(BaseModel):
     track_ids: list[int] = Field(default_factory=list, min_length=0)
     #: アルバム単位でまとめて追加する場合
@@ -50,6 +54,14 @@ class ReorderRequest(BaseModel):
 
 @router.get("")
 def list_playlists(ctx: Ctx) -> dict[str, Any]:
+    items = ctx.repo.list_playlists()
+    return {"items": items, "total": len(items)}
+
+
+@router.post("/reorder")
+def reorder_playlists(ctx: Ctx, body: ReorderPlaylistsRequest) -> dict[str, Any]:
+    """プレイリスト自体の並び順を入れ替える（要件 3.4）。"""
+    ctx.playlists.reorder_playlists(body.playlist_ids)
     items = ctx.repo.list_playlists()
     return {"items": items, "total": len(items)}
 

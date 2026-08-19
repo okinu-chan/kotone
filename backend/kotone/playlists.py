@@ -44,10 +44,14 @@ class PlaylistService:
             ignore_leading_article=bool(self.settings.get("ignore_leading_article")),
         )
         with self.db.transaction() as conn:
+            # 新しいプレイリストは末尾に置く（並び順は利用者が決める）
+            next_position = conn.execute(
+                "SELECT COALESCE(MAX(position), -1) + 1 FROM playlists"
+            ).fetchone()[0]
             cursor = conn.execute(
-                "INSERT INTO playlists (name, reading, sort_key, initial, initial_group) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (name, reading, sort_key, initial, group),
+                "INSERT INTO playlists (name, reading, sort_key, initial, initial_group, "
+                "position) VALUES (?, ?, ?, ?, ?, ?)",
+                (name, reading, sort_key, initial, group, next_position),
             )
             playlist_id = int(cursor.lastrowid)
         if track_ids:
@@ -75,6 +79,24 @@ class PlaylistService:
                 "initial_group = ?, updated_at = datetime('now') WHERE id = ?",
                 (name, reading, sort_key, initial, group, playlist_id),
             )
+
+    def reorder_playlists(self, playlist_ids: list[int]) -> None:
+        """プレイリストの並び順を、渡された順に置き換える。
+
+        画面に出ていなかったプレイリスト（別の端末で増えた等）を落とさない
+        よう、渡されなかったものは後ろへ回す。
+        """
+        with self.db.transaction() as conn:
+            known = [
+                int(r["id"])
+                for r in conn.execute("SELECT id FROM playlists ORDER BY position, id")
+            ]
+            ordered = [pid for pid in playlist_ids if pid in known]
+            ordered += [pid for pid in known if pid not in ordered]
+            for position, playlist_id in enumerate(ordered):
+                conn.execute(
+                    "UPDATE playlists SET position = ? WHERE id = ?", (position, playlist_id)
+                )
 
     def delete(self, playlist_id: int) -> None:
         with self.db.transaction() as conn:

@@ -395,7 +395,8 @@ class LibraryRepository:
                         WHERE pt.playlist_id = p.id
                         ORDER BY pt.position LIMIT 1) AS artwork_album_id
             FROM playlists p
-            ORDER BY p.sort_key, p.reading, p.name
+            -- 並び順は利用者が決める（position）。同点は読み順で安定させる
+            ORDER BY p.position, p.sort_key, p.reading, p.name
             """
         )
 

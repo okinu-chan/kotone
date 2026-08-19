@@ -1,6 +1,7 @@
 <script>
   /** 再生中画面以外で下部に出る小さな再生バー。タップで再生中画面へ。 */
   import AlbumArt from './AlbumArt.svelte';
+  import VolumeControl from './VolumeControl.svelte';
   import { api } from '../api.js';
   import { player } from '../stores.svelte.js';
   import { router } from '../router.svelte.js';
@@ -20,6 +21,7 @@
         <span class="artist truncate dim">{track.artist || track.album || ''}</span>
       </div>
     </button>
+    <VolumeControl placement="up" />
     <button
       class="control"
       onclick={() => player.command(api.toggle)}

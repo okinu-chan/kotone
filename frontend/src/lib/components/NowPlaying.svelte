@@ -12,6 +12,7 @@
   import ArtworkViewer from './ArtworkViewer.svelte';
   import Modal from './Modal.svelte';
   import ScrollingTitle from './ScrollingTitle.svelte';
+  import VolumeControl from './VolumeControl.svelte';
   import { api } from '../api.js';
   import { formatCodec, formatQuality, formatTime, ORDER_LABELS, REPEAT_LABELS } from '../format.js';
   import { player, toast } from '../stores.svelte.js';
@@ -60,10 +61,6 @@
     const seconds = Number(event.currentTarget.value);
     player.seeking = false;
     await player.command(() => api.seek(seconds));
-  }
-
-  function onVolume(event) {
-    player.command(() => api.setVolume(Number(event.currentTarget.value)));
   }
 
   // --- アートワーク上の横スワイプ（曲送り／曲戻し） ------------------
@@ -278,21 +275,10 @@
     <span class="sep">·</span>{player.state.scope?.label ?? ''}
   </p>
 
-  <!-- 音量をアンプ側で取る構成ではスライダーを出さない（設定「音量の操作方法」） -->
-  {#if player.state.volume_control !== 'external'}
-    <div class="volume">
-      <span aria-hidden="true">🔈</span>
-      <input
-        type="range"
-        min="0"
-        max="100"
-        value={player.state.volume ?? 60}
-        onchange={onVolume}
-        aria-label="音量"
-      />
-      <span class="tabular dim vol-value">{player.state.volume ?? 0}</span>
-    </div>
-  {/if}
+  <!-- 音量はスピーカーのアイコンから。アンプ側で取る構成では出ない -->
+  <div class="volume-row">
+    <VolumeControl placement="down" />
+  </div>
 
   <div class="extras">
     {#if track?.album_id}
@@ -303,6 +289,15 @@
     {#if track}
       <button class="album-link" onclick={() => (addOpen = true)}>
         この曲をプレイリストへ追加
+      </button>
+    {/if}
+    <!-- プレイリストから再生しているときは、その一覧へ戻れるようにする -->
+    {#if player.state.scope?.kind === 'playlist' && player.state.scope?.id}
+      <button
+        class="album-link"
+        onclick={() => router.navigate(`/playlists/${player.state.scope.id}`)}
+      >
+        再生中のプレイリストを開く
       </button>
     {/if}
   </div>
@@ -631,16 +626,10 @@
     font-size: var(--fs-sm);
   }
 
-  .volume {
+  /* 音量アイコンは中央に置く（縦バーはアイコンの真下に出る） */
+  .volume-row {
     display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .vol-value {
-    min-width: 2.5em;
-    text-align: right;
-    font-size: var(--fs-md);
+    justify-content: center;
   }
 
   /* 副次的な操作。狭い画面では縦に積み、広ければ横に並べる */

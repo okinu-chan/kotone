@@ -92,6 +92,7 @@ export const api = {
   // --- プレイリスト ---------------------------------------------------
   playlists: () => get('/playlists'),
   playlist: (id) => get(`/playlists/${id}`),
+  reorderPlaylists: (ids) => post('/playlists/reorder', { playlist_ids: ids }),
   createPlaylist: (name, trackIds = []) => post('/playlists', { name, track_ids: trackIds }),
   renamePlaylist: (id, name) => patch(`/playlists/${id}`, { name }),
   deletePlaylist: (id) => del(`/playlists/${id}`),
