@@ -25,6 +25,14 @@
   /** 名前の変更 */
   let renameOpen = $state(false);
   let renameDraft = $state('');
+  /**
+   * 削除の確認。
+   *
+   * window.confirm は環境によって出ないことがある（iOS Safari で削除できない
+   * との報告）。アプリ内のダイアログなら、どの環境でも同じように出る。
+   */
+  let confirmOpen = $state(false);
+  let confirmTarget = $state(null);
 
   async function load() {
     loading = true;
@@ -81,14 +89,19 @@
     }
   }
 
-  async function destroy() {
-    const target = menuTarget;
+  function askDestroy() {
+    confirmTarget = menuTarget;
     menuOpen = false;
+    confirmOpen = true;
+  }
+
+  async function destroy() {
+    const target = confirmTarget;
+    confirmOpen = false;
     if (!target) return;
-    if (!window.confirm(`「${target.name}」を削除します。よろしいですか？`)) return;
     try {
       await api.deletePlaylist(target.id);
-      toast.info('削除しました');
+      toast.info(`「${target.name}」を削除しました`);
       await load();
     } catch (error) {
       toast.error(error.detail || String(error));
@@ -216,10 +229,21 @@
   <Modal bind:open={menuOpen} title={menuTarget?.name ?? ''}>
     <ul class="menu-list">
       <li><button onclick={startRename}>名前の変更</button></li>
-      <li><button class="danger-text" onclick={destroy}>削除</button></li>
+      <li><button class="danger-text" onclick={askDestroy}>削除</button></li>
     </ul>
     {#snippet footer()}
       <button class="ghost" onclick={() => (menuOpen = false)}>閉じる</button>
+    {/snippet}
+  </Modal>
+
+  <Modal bind:open={confirmOpen} title="プレイリストを削除しますか？">
+    <p class="confirm-lead">「{confirmTarget?.name ?? ''}」を削除します。</p>
+    <p class="confirm-note dim">
+      {confirmTarget?.track_count ?? 0} 曲の並びが失われます。音源そのものは消えません。
+    </p>
+    {#snippet footer()}
+      <button class="ghost" onclick={() => (confirmOpen = false)}>取消</button>
+      <button class="danger" onclick={destroy}>削除</button>
     {/snippet}
   </Modal>
 
@@ -384,6 +408,25 @@
     border-radius: 999px;
     border: 1px solid var(--border);
     color: var(--text-muted);
+  }
+
+  .danger {
+    min-height: var(--tap);
+    padding: 0 20px;
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, var(--danger) 50%, transparent);
+    color: var(--danger);
+  }
+
+  .confirm-lead {
+    margin: 0 0 10px;
+    font-size: var(--fs-lg);
+  }
+
+  .confirm-note {
+    margin: 0;
+    font-size: var(--fs-sm);
+    line-height: 1.6;
   }
 
   .thumb {
