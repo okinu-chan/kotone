@@ -7,6 +7,7 @@
    * アルバムアート上の横スワイプで曲送り／曲戻し（画面端ではなく操作対象の
    * 内部に限定。要件 3.5）。
    */
+  import AddToPlaylist from './AddToPlaylist.svelte';
   import AlbumArt from './AlbumArt.svelte';
   import ArtworkViewer from './ArtworkViewer.svelte';
   import Modal from './Modal.svelte';
@@ -35,6 +36,7 @@
 
   let zoomOpen = $state(false);
   let fullTitleOpen = $state(false);
+  let addOpen = $state(false);
 
   const REPEAT_ORDER = ['off', 'range', 'one'];
   const PLAY_ORDER = ['normal', 'shuffle', 'random'];
@@ -292,12 +294,23 @@
     </div>
   {/if}
 
-  {#if track?.album_id}
-    <button class="album-link" onclick={playAlbumFromHere}>
-      このアルバムを最初から再生
-    </button>
-  {/if}
+  <div class="extras">
+    {#if track?.album_id}
+      <button class="album-link" onclick={playAlbumFromHere}>
+        このアルバムを最初から再生
+      </button>
+    {/if}
+    {#if track}
+      <button class="album-link" onclick={() => (addOpen = true)}>
+        この曲をプレイリストへ追加
+      </button>
+    {/if}
+  </div>
 </section>
+
+{#if track}
+  <AddToPlaylist bind:open={addOpen} trackIds={[track.id]} />
+{/if}
 
 <!-- 長いタイトルの全文表示（スクロールを待たずに読めるように）。
      読むだけなので、どこをタップしても閉じる -->
@@ -630,6 +643,13 @@
     font-size: var(--fs-md);
   }
 
+  /* 副次的な操作。狭い画面では縦に積み、広ければ横に並べる */
+  .extras {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
   .album-link {
     min-height: var(--tap);
     border-radius: var(--radius);
@@ -652,6 +672,14 @@
 
     .title {
       font-size: 26px;
+    }
+
+    .extras {
+      flex-direction: row;
+    }
+
+    .extras .album-link {
+      flex: 1;
     }
   }
 </style>

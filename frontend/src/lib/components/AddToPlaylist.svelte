@@ -6,7 +6,14 @@
   import { api } from '../api.js';
   import { toast } from '../stores.svelte.js';
 
-  let { open = $bindable(false), trackIds = [], albumId = null, artistId = null } = $props();
+  let {
+    open = $bindable(false),
+    trackIds = [],
+    albumId = null,
+    artistId = null,
+    /** 追加が終わったら呼ぶ（呼び出し側の選択モードを閉じるなど） */
+    onadded,
+  } = $props();
 
   let playlists = $state([]);
   let newName = $state('');
@@ -34,6 +41,7 @@
       const updated = await api.addToPlaylist(playlist.id, payload);
       toast.info(`「${playlist.name}」に追加しました（${updated.track_count} 曲）`);
       open = false;
+      onadded?.();
     } catch (error) {
       toast.error(error.detail || String(error));
     } finally {
@@ -51,6 +59,7 @@
       toast.info(`「${name}」を作成して追加しました`);
       newName = '';
       open = false;
+      onadded?.();
     } catch (error) {
       toast.error(error.detail || String(error));
     } finally {

@@ -14,16 +14,43 @@
     showAlbum = true,
     onplay,
     onmenu,
+    /**
+     * 選択モード。曲の左にチェックボックスを出し、タップで再生ではなく
+     * 選択の切り替えになる（プレイリストへ入れる曲を選ぶときに使う）。
+     */
+    selectable = false,
+    /** 選択済みの曲 id（Set）。1 つの一覧に同じ曲は並ばない前提で id を使う */
+    selectedIds = new Set(),
+    ontoggleselect,
   } = $props();
 
   const currentPath = $derived(player.state.raw_file ?? null);
 </script>
 
 <ul class="tracks">
-  {#each tracks as track, index (track.id)}
+  <!-- 同じ曲が複数回並ぶことがある（プレイリストへ同じアルバムを 2 回入れた、
+       ランダム再生のキューで同じ曲が再抽選された、など）。曲 id で鍵を付けると
+       重複してレンダリングごと落ち、読み込み中の表示のまま止まってしまう。
+       行の識別子は「何番目か」なので index を鍵にする。 -->
+  {#each tracks as track, index (index)}
     {@const active = track.path === currentPath}
-    <li class:active>
-      <button class="row" onclick={() => onplay?.(track, index)}>
+    {@const checked = selectable && selectedIds.has(track.id)}
+    <li class:active class:selected={checked}>
+      <button
+        class="row"
+        onclick={() => (selectable ? ontoggleselect?.(track) : onplay?.(track, index))}
+        aria-pressed={selectable ? checked : undefined}
+      >
+        {#if selectable}
+          <span class="check" class:on={checked} aria-hidden="true">
+            {#if checked}
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"
+                   stroke-linecap="round" stroke-linejoin="round">
+                <path d="M5 12.5 10 17.5 19 7" />
+              </svg>
+            {/if}
+          </span>
+        {/if}
         {#if showArtwork}
           <div class="thumb">
             <AlbumArt album={{ id: track.album_id, artwork: track.artwork }} tier="small" alt="" />
@@ -52,7 +79,7 @@
         <span class="time tabular dim">{formatTime(track.duration)}</span>
       </button>
 
-      {#if onmenu}
+      {#if onmenu && !selectable}
         <button class="menu" onclick={() => onmenu(track, index)} aria-label="この曲の操作">⋯</button>
       {/if}
     </li>
@@ -77,6 +104,33 @@
 
   li.active {
     background: color-mix(in srgb, var(--accent) 9%, transparent);
+  }
+
+  li.selected {
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+  }
+
+  /* 選択モードのチェックボックス。タップ領域は行全体なので、
+     見た目だけを担う（枠は未選択でも見えるようにして操作を示す） */
+  .check {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 24px;
+    height: 24px;
+    border: 2px solid var(--text-dim);
+    border-radius: 6px;
+    color: var(--on-accent);
+  }
+
+  .check.on {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .check svg {
+    width: 16px;
+    height: 16px;
   }
 
   .row {

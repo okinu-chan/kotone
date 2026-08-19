@@ -22,6 +22,61 @@
   let albumEditorOpen = $state(false);
   let zoomOpen = $state(false);
 
+  /**
+   * プレイリストへ入れる曲の選択。
+   *
+   * 「プレイリストへ追加」を押すとまず選択モードに入る。アルバム 1 枚を
+   * まるごと入れたい場合が多いので、入った時点では全曲を選んだ状態にして
+   * おき、要らない曲を外す形にする（従来の「アルバムごと追加」がそのまま
+   * 通る）。
+   */
+  let selecting = $state(false);
+  let selectedIds = $state(new Set());
+
+  const allTrackIds = $derived((album?.tracks ?? []).map((t) => t.id));
+  const allSelected = $derived(
+    allTrackIds.length > 0 && selectedIds.size === allTrackIds.length,
+  );
+  /**
+   * 追加する曲 id を、アルバムの曲順で並べたもの。
+   *
+   * Set をそのまま展開すると「選んだ順」になり、いったん外して選び直した曲が
+   * 末尾へ回ってしまう。プレイリストには曲順どおりに入れたい。
+   */
+  const selectedTrackIds = $derived(allTrackIds.filter((id) => selectedIds.has(id)));
+
+  function startSelecting() {
+    selectedIds = new Set(allTrackIds);
+    selecting = true;
+  }
+
+  function cancelSelecting() {
+    selecting = false;
+    selectedIds = new Set();
+  }
+
+  function toggleTrack(track) {
+    // Set を作り直して差し替える（同じ Set を書き換えても再描画されない）
+    const next = new Set(selectedIds);
+    if (next.has(track.id)) next.delete(track.id);
+    else next.add(track.id);
+    selectedIds = next;
+  }
+
+  function toggleAll() {
+    selectedIds = allSelected ? new Set() : new Set(allTrackIds);
+  }
+
+  function openAddSheet() {
+    if (selectedIds.size === 0) return;
+    addOpen = true;
+  }
+
+  /** 追加し終えたら選択モードから抜ける */
+  function onAdded() {
+    cancelSelecting();
+  }
+
   $effect(() => {
     const albumId = id;
     loading = true;
@@ -126,10 +181,27 @@
       </p>
       <div class="actions">
         <button class="primary" onclick={playAll}>再生</button>
-        <button class="ghost" onclick={() => (addOpen = true)}>プレイリストへ追加</button>
+        <button class="ghost" onclick={startSelecting} disabled={selecting}>
+          プレイリストへ追加
+        </button>
       </div>
     </div>
   </div>
+
+  {#if selecting}
+    <div class="select-bar">
+      <span class="count tabular">{selectedIds.size} 曲を選択中</span>
+      <div class="select-actions">
+        <button class="ghost" onclick={toggleAll}>
+          {allSelected ? 'すべて解除' : 'すべて選択'}
+        </button>
+        <button class="ghost" onclick={cancelSelecting}>やめる</button>
+        <button class="primary" onclick={openAddSheet} disabled={selectedIds.size === 0}>
+          追加
+        </button>
+      </div>
+    </div>
+  {/if}
 
   {#each discs as disc (disc.number ?? 'single')}
     {#if disc.number !== null}
@@ -147,10 +219,13 @@
       showAlbum={false}
       onplay={playFrom}
       onmenu={openEditor}
+      selectable={selecting}
+      {selectedIds}
+      ontoggleselect={toggleTrack}
     />
   {/each}
 
-  <AddToPlaylist bind:open={addOpen} albumId={album.id} />
+  <AddToPlaylist bind:open={addOpen} trackIds={selectedTrackIds} onadded={onAdded} />
   <TagEditor bind:open={editorOpen} track={editingTrack} onsaved={onTrackSaved} />
   <AlbumEditor
     bind:open={albumEditorOpen}
@@ -271,6 +346,46 @@
   .ghost:hover {
     background: var(--surface-hover);
     color: var(--text);
+  }
+
+  .primary:disabled,
+  .ghost:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+
+  /* 選択中の操作バー。曲数の多いアルバムでもスクロール中に届くよう固定する */
+  .select-bar {
+    position: sticky;
+    top: calc(var(--tap) + var(--safe-top) + 16px);
+    z-index: 19;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 10px 16px;
+    background: var(--bg-elevated);
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .select-bar .count {
+    font-size: var(--fs-md);
+    color: var(--text-muted);
+  }
+
+  .select-actions {
+    display: flex;
+    gap: 8px;
+  }
+
+  /* バーの中では小さめに（3 つ並ぶため） */
+  .select-actions .primary,
+  .select-actions .ghost {
+    min-height: 40px;
+    padding: 0 16px;
+    font-size: var(--fs-md);
   }
 
   .disc-heading {
