@@ -508,3 +508,104 @@ def test_recent_filter_combines_with_other_filters(
         added_after=stats.recent_baseline, initial="Z", initial_group="latin",
         initial_by="album",
     ) == 0
+
+
+def _add_album(config: Config, folder: str, album: str, artist: str, count: int = 2) -> list[str]:
+    """テスト用のライブラリにアルバムを 1 枚足す。"""
+    paths = []
+    for index in range(1, count + 1):
+        rel = f"{folder}/{index:02d} {album} {index}.flac"
+        LIBRARY[rel] = {
+            "title": f"{album} {index}", "artists": [artist], "album_artists": [artist],
+            "album": album, "genres": ["J-Pop"], "date": "2026", "track_no": index,
+        }
+        path = config.music_dir / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(bytes(128))
+        paths.append(rel)
+    return paths
+
+
+def _drop_album(config: Config, rel_paths: list[str]) -> None:
+    """ライブラリからアルバムのファイルを消す（利用者が SSD 上で消した状況）。"""
+    for rel in rel_paths:
+        LIBRARY.pop(rel, None)
+        (config.music_dir / rel).unlink(missing_ok=True)
+
+
+def test_delete_and_add_in_one_scan_lists_only_the_new_album(
+    scan: LibraryScanner, db: Database, config: Config
+) -> None:
+    """既存アルバムの削除と新規追加を同時に行っても、新しいほうだけが新着になる。
+
+    利用者が SSD 上で入れ替えをしてから 1 回スキャンする、という使い方。
+    消えたアルバムは行ごと無くなるので新着には出ず、増えたアルバムだけが残る。
+    """
+    scan.scan()
+    stats = StatsStore(db)
+    repo = LibraryRepository(db)
+    baseline = stats.recent_baseline
+    assert repo.count_albums(added_after=baseline) == 0
+
+    added = _add_album(config, "新しい人/新しいアルバム", "新しいアルバム", "新しい人")
+    removed = [p for p in LIBRARY if p.startswith("Radiohead/OK Computer")]
+    # LIBRARY はモジュール共有なので、消した分は必ず戻す（他のテストに漏れる）
+    saved = {rel: LIBRARY[rel] for rel in removed}
+    _drop_album(config, removed)
+    try:
+        time.sleep(1.1)   # 追加日は秒単位。起点と同じ秒に入らないようずらす
+        scan.scan()
+
+        names = [a["name"] for a in repo.list_albums(sort="added", added_after=baseline)]
+        assert names == ["新しいアルバム"]
+        # 消したアルバムはライブラリ自体から消えている
+        assert "OK Computer" not in [a["name"] for a in repo.list_albums()]
+    finally:
+        _drop_album(config, added)
+        LIBRARY.update(saved)
+
+
+def test_full_rescan_does_not_make_everything_recent(
+    scan: LibraryScanner, db: Database
+) -> None:
+    """完全な再スキャンをしても、既存のアルバムが新着になり直さないこと。
+
+    追加日を入れ直してしまうと、ライブラリ全体が新着になって使い物に
+    ならなくなる。
+    """
+    scan.scan()
+    stats = StatsStore(db)
+    repo = LibraryRepository(db)
+    baseline = stats.recent_baseline
+
+    time.sleep(1.1)
+    scan.scan(full=True)
+
+    assert repo.count_albums(added_after=baseline) == 0
+    assert StatsStore(db).recent_baseline == baseline
+
+
+def test_adding_a_track_to_an_existing_album_is_not_recent(
+    scan: LibraryScanner, db: Database, config: Config
+) -> None:
+    """既存アルバムに曲を足しただけでは新着に出ない（アルバム単位の機能のため）。"""
+    scan.scan()
+    stats = StatsStore(db)
+    repo = LibraryRepository(db)
+    baseline = stats.recent_baseline
+
+    rel = "Radiohead/OK Computer/02 Paranoid Android.flac"
+    LIBRARY[rel] = {
+        "title": "Paranoid Android", "artists": ["Radiohead"],
+        "album_artists": ["Radiohead"], "album": "OK Computer",
+        "genres": ["Alternative"], "date": "1997", "track_no": 2,
+    }
+    path = config.music_dir / rel
+    path.write_bytes(bytes(128))
+    try:
+        time.sleep(1.1)
+        scan.scan()
+        assert repo.count_albums(added_after=baseline) == 0
+    finally:
+        LIBRARY.pop(rel, None)
+        path.unlink(missing_ok=True)
