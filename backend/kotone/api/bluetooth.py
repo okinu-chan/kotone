@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -59,12 +60,16 @@ async def bluetooth_state(ctx: Ctx) -> dict[str, Any]:
     """アダプタの状態と、既知の機器の一覧。"""
     adapter = await ctx.bluetooth.adapter_info()
     devices: list[dict[str, Any]] = []
+    codec = None
     if adapter.get("available"):
         devices = [d.as_dict() for d in await ctx.bluetooth.devices()]
+        if any(d["connected"] for d in devices):
+            codec = await ctx.bluetooth.codec_info()
     return {
         "adapter": adapter,
         "scanning": ctx.bluetooth.scanning,
         "devices": devices,
+        "codec": codec,
     }
 
 
@@ -85,13 +90,34 @@ async def scan(ctx: Ctx, body: ScanRequest | None = None) -> dict[str, Any]:
 @router.post("/bluetooth/pair")
 async def pair(ctx: Ctx, body: AddressRequest) -> dict[str, Any]:
     device = await _guard(ctx.bluetooth.pair(body.address))
-    return {"device": device.as_dict()}
+    codec = await _prefer_quality(ctx)
+    return {"device": device.as_dict(), "codec": codec}
 
 
 @router.post("/bluetooth/connect")
 async def connect(ctx: Ctx, body: AddressRequest) -> dict[str, Any]:
     device = await _guard(ctx.bluetooth.connect(body.address))
-    return {"device": device.as_dict()}
+    codec = await _prefer_quality(ctx)
+    return {"device": device.as_dict(), "codec": codec}
+
+
+@router.get("/bluetooth/codec")
+async def codec(ctx: Ctx) -> dict[str, Any]:
+    """いま接続中の機器で使われているコーデック。"""
+    return {"codec": await ctx.bluetooth.codec_info(fresh=True)}
+
+
+async def _prefer_quality(ctx: Ctx) -> dict[str, Any] | None:
+    """設定が有効なら、使えるうちで一番よいコーデックへ切り替える。
+
+    接続直後は相手がコーデック一覧を出し終えていないことがあるので、
+    少し待ってから読む。
+    """
+    if not ctx.settings.get("bluetooth_prefer_quality"):
+        return await ctx.bluetooth.codec_info(fresh=True)
+    await asyncio.sleep(1.0)
+    await ctx.bluetooth.select_best_codec()
+    return await ctx.bluetooth.codec_info(fresh=True)
 
 
 @router.post("/bluetooth/disconnect")

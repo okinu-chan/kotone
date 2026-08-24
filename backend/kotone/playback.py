@@ -87,12 +87,17 @@ class PlaybackController:
         repo: LibraryRepository,
         settings: SettingsStore,
         events: EventBus,
+        outputs: Any = None,
+        bluetooth: Any = None,
     ) -> None:
         self.mpd = mpd
         self.db = db
         self.repo = repo
         self.settings = settings
         self.events = events
+        #: 出力先（USB DAC / Bluetooth）と BT の情報。再生中画面に出すために持つ
+        self.outputs = outputs
+        self.bluetooth = bluetooth
 
         self.scope = PlayScope()
         self.repeat_mode: RepeatMode = "off"
@@ -867,9 +872,31 @@ class PlaybackController:
             "bitrate": _int_or_none(status.get("bitrate")),
             "track": track,
             "raw_file": song.get("file"),
+            **await self._output_state(),
         }
         self._cached_state = state
         return state
+
+    async def _output_state(self) -> dict[str, Any]:
+        """いまどこへ音を出しているか。Bluetooth ならコーデックも添える。
+
+        再生中画面に「SBC で接続中」のように出すために使う。コーデックの
+        読み出しは数秒キャッシュされるので、状態を配信するたびに D-Bus を
+        叩くことにはならない。
+        """
+        if self.outputs is None:
+            return {"output": None, "bluetooth_codec": None}
+        try:
+            active = await self.outputs.active()
+        except Exception:
+            log.debug("出力先を取得できませんでした", exc_info=True)
+            return {"output": None, "bluetooth_codec": None}
+
+        codec = None
+        if active and active.get("bluetooth") and self.bluetooth is not None:
+            info = await self.bluetooth.codec_info()
+            codec = (info or {}).get("codec")
+        return {"output": active, "bluetooth_codec": codec}
 
     def state_snapshot(self) -> dict[str, Any]:
         return dict(self._cached_state)

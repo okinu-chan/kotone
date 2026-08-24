@@ -29,6 +29,8 @@ from typing import Any
 log = logging.getLogger(__name__)
 
 BLUEZ = "org.bluez"
+BLUEALSA = "org.bluealsa"
+BLUEALSA_PCM_IFACE = "org.bluealsa.PCM1"
 ADAPTER_IFACE = "org.bluez.Adapter1"
 DEVICE_IFACE = "org.bluez.Device1"
 PROPS_IFACE = "org.freedesktop.DBus.Properties"
@@ -40,6 +42,16 @@ DEFAULT_SCAN_SECONDS = 12.0
 #: 音を出せる機器だけを出すためのサービス UUID。
 #: A2DP Sink（イヤホン・スピーカー側）を持つ機器が対象。
 A2DP_SINK_UUID = "0000110b-0000-1000-8000-00805f9b34fb"
+
+#: 音質の優先順（前ほど優先）。
+#:
+#: 実際に使えるのは「Pi 側が対応しているもの」と「機器が提示したもの」の
+#: 重なりだけ。ここに無い名前は順位付けの対象外で、機器任せになる。
+CODEC_PRIORITY: tuple[str, ...] = ("LDAC", "aptX HD", "aptX", "AAC", "SBC")
+
+#: 接続中のコーデックを読み直す間隔（秒）。
+#: 再生状態は毎秒のように配信されるので、その都度 D-Bus を叩かない。
+CODEC_CACHE_SECONDS = 5.0
 
 
 class BluetoothError(RuntimeError):
@@ -83,6 +95,8 @@ class BluetoothManager:
     def __init__(self) -> None:
         self._lock = asyncio.Lock()
         self._scanning = False
+        #: 直近に読んだコーデック情報と、その時刻（毎回 D-Bus を叩かないため）
+        self._codec_cache: tuple[float, dict[str, Any] | None] = (0.0, None)
 
     # ------------------------------------------------------------ 基本
 
@@ -215,6 +229,70 @@ class BluetoothManager:
             path = await _device_path(bus, address)
             return _to_device(await _get_all(bus, path, DEVICE_IFACE))
 
+    # ------------------------------------------------------------ コーデック
+
+    async def codec_info(self, *, fresh: bool = False) -> dict[str, Any] | None:
+        """いま接続中の機器で使われているコーデック。
+
+        接続していなければ None。値は数秒キャッシュする（再生状態の配信の
+        たびに D-Bus を叩かないため）。
+        """
+        now = asyncio.get_running_loop().time()
+        cached_at, cached = self._codec_cache
+        if not fresh and now - cached_at < CODEC_CACHE_SECONDS:
+            return cached
+
+        info = await self._read_codec()
+        self._codec_cache = (now, info)
+        return info
+
+    async def _read_codec(self) -> dict[str, Any] | None:
+        try:
+            async with _bus() as bus:
+                path = await _pcm_path(bus)
+                if path is None:
+                    return None
+                props = await _get_all(bus, path, BLUEALSA_PCM_IFACE, service=BLUEALSA)
+                available = await _available_codecs(bus, path)
+                return {
+                    "codec": str(_value(props.get("Codec"), "")) or None,
+                    "available": available,
+                    "samplerate": int(_value(props.get("Sampling"), 0)) or None,
+                    "channels": int(_value(props.get("Channels"), 0)) or None,
+                }
+        except Exception:
+            log.debug("コーデックを読めませんでした", exc_info=True)
+            return None
+
+    async def select_best_codec(self) -> str | None:
+        """使えるうちで一番音質のよいコーデックへ切り替える。
+
+        切り替えるのは、いま使っているものより上位が実際に使える場合だけ。
+        使えるコーデックは相手機器が提示したものとの重なりで決まるので、
+        機器が LDAC を出していなければ何もしない。
+        """
+        info = await self.codec_info(fresh=True)
+        if not info:
+            return None
+        available = info.get("available") or []
+        current = info.get("codec")
+        best = next((c for c in CODEC_PRIORITY if c in available), None)
+        if best is None or best == current:
+            return current
+        try:
+            async with _bus() as bus:
+                path = await _pcm_path(bus)
+                if path is None:
+                    return current
+                pcm = await _interface(bus, path, BLUEALSA_PCM_IFACE, service=BLUEALSA)
+                await asyncio.wait_for(pcm.call_select_codec(best, {}), timeout=20.0)
+        except Exception as exc:
+            log.warning("コーデックを %s へ切り替えられませんでした: %s", best, exc)
+            return current
+        log.info("Bluetooth のコーデックを %s へ切り替えました", best)
+        self._codec_cache = (0.0, None)
+        return best
+
     async def connected_device(self) -> BluetoothDevice | None:
         """いま音を出せる状態でつながっている機器（無ければ None）。"""
         for device in await self.devices():
@@ -280,15 +358,39 @@ async def _device_path(bus: Any, address: str) -> str:
     raise BluetoothError(f"機器が見つかりません: {address}")
 
 
-async def _interface(bus: Any, path: str, iface: str) -> Any:
-    introspection = await bus.introspect(BLUEZ, path)
-    proxy = bus.get_proxy_object(BLUEZ, path, introspection)
+async def _interface(bus: Any, path: str, iface: str, *, service: str = BLUEZ) -> Any:
+    introspection = await bus.introspect(service, path)
+    proxy = bus.get_proxy_object(service, path, introspection)
     return proxy.get_interface(iface)
 
 
-async def _get_all(bus: Any, path: str, iface: str) -> dict[str, Any]:
-    props = await _interface(bus, path, PROPS_IFACE)
+async def _get_all(bus: Any, path: str, iface: str, *, service: str = BLUEZ) -> dict[str, Any]:
+    props = await _interface(bus, path, PROPS_IFACE, service=service)
     return await props.call_get_all(iface)
+
+
+async def _pcm_path(bus: Any) -> str | None:
+    """bluealsa が公開している、送り出し側の PCM のパス。
+
+    接続中の機器が無ければ None。複数つながっている場合は最初の 1 つ。
+    """
+    manager = await _interface(
+        bus, "/org/bluealsa", "org.bluealsa.Manager1", service=BLUEALSA
+    )
+    for path, _props in await manager.call_get_pcms():
+        if "a2dpsrc" in path:
+            return path
+    return None
+
+
+async def _available_codecs(bus: Any, path: str) -> list[str]:
+    """相手機器と共通で使えるコーデックの名前。"""
+    pcm = await _interface(bus, path, BLUEALSA_PCM_IFACE, service=BLUEALSA)
+    try:
+        return list((await pcm.call_get_codecs()).keys())
+    except Exception:
+        log.debug("使えるコーデックの一覧を取れませんでした", exc_info=True)
+        return []
 
 
 async def _set(bus: Any, path: str, iface: str, name: str, signature: str, value: Any) -> None:

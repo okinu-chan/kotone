@@ -19,6 +19,8 @@
 
   const adapter = $derived(bt.adapter ?? {});
   const connected = $derived(bt.devices.find((d) => d.connected) ?? null);
+  /** いま使われているコーデック（機器側の画面で分からない機種のために出す） */
+  const codecName = $derived(bt.codec?.codec ?? null);
   const paired = $derived(bt.devices.filter((d) => d.paired));
   const nearby = $derived(bt.devices.filter((d) => !d.paired));
 
@@ -131,10 +133,7 @@
 
 <section class="card">
   <h2>Bluetooth</h2>
-  <p class="intro">
-    イヤホン・ヘッドホン・スピーカーへ音を送れます。Bluetooth は音を必ず圧縮して送るため、
-    USB DAC と同じ音にはなりません。ハイレゾ音源も 48kHz / 16bit 以下へ変換されます。
-  </p>
+  <p class="intro">イヤホン・ヘッドホン・スピーカーへ音を送れます。</p>
 
   {#if !adapter.available}
     <p class="warn">Bluetooth アダプタが見つかりません。</p>
@@ -161,7 +160,11 @@
               <span class="text">
                 <span class="name truncate">{device.name}</span>
                 <span class="state dim">
-                  {device.connected ? '接続中' : '未接続'}
+                  {#if device.connected}
+                    {codecName ? `${codecName} で接続中` : '接続中'}
+                  {:else}
+                    未接続
+                  {/if}
                 </span>
               </span>
               <div class="row-actions">

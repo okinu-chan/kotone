@@ -142,12 +142,15 @@ class AppContext:
         self.mpd = MPDConnection(
             host=config.mpd_host, port=config.mpd_port, password=config.mpd_password
         )
+        # 再生中画面に「どこへ出しているか」「何のコーデックか」を出すため、
+        # 出力と Bluetooth は再生コントローラより先に作って渡す
+        self.outputs = OutputController(self.mpd)
+        self.bluetooth = BluetoothManager()
         self.player = PlaybackController(
             mpd=self.mpd, db=self.db, repo=self.repo,
             settings=self.settings, events=self.events,
+            outputs=self.outputs, bluetooth=self.bluetooth,
         )
-        self.outputs = OutputController(self.mpd)
-        self.bluetooth = BluetoothManager()
         self.scan = ScanManager(self)
 
     @property

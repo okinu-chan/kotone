@@ -144,6 +144,13 @@ SETTING_SPECS: tuple[SettingSpec, ...] = (
         choices=("grid", "list"),
     ),
     SettingSpec(
+        "bluetooth_prefer_quality", True, "高音質コーデックを優先する", "bool",
+        "接続時に、両方が対応しているうちで一番音質のよいコーデックへ切り替えます"
+        "（LDAC → aptX HD → aptX → AAC → SBC の順）。"
+        "使えるのは相手機器が提示したものだけなので、機器が対応していなければ"
+        "何も変わりません。オフにすると機器任せになります。",
+    ),
+    SettingSpec(
         "initial_search_by", "artist", "頭文字で絞り込む対象", "enum",
         "アルバム一覧をイニシャルサーチするとき、アルバム名とアーティスト名の"
         "どちらの頭文字で引くか。既定はアーティスト名（ウォークマンの頭出しに倣う）。"
