@@ -373,12 +373,17 @@ async def _pcm_path(bus: Any) -> str | None:
     """bluealsa が公開している、送り出し側の PCM のパス。
 
     接続中の機器が無ければ None。複数つながっている場合は最初の 1 つ。
+
+    bluealsa の Manager1 には一覧を返すメソッドが無い（プロパティだけ）ので、
+    標準の ObjectManager から拾う。BlueZ と違い、ObjectManager が居るのは
+    ルートではなく ``/org/bluealsa``。
     """
-    manager = await _interface(
-        bus, "/org/bluealsa", "org.bluealsa.Manager1", service=BLUEALSA
-    )
-    for path, _props in await manager.call_get_pcms():
-        if "a2dpsrc" in path:
+    root = "/org/bluealsa"
+    introspection = await bus.introspect(BLUEALSA, root)
+    proxy = bus.get_proxy_object(BLUEALSA, root, introspection)
+    manager = proxy.get_interface(OBJECT_MANAGER)
+    for path, interfaces in (await manager.call_get_managed_objects()).items():
+        if BLUEALSA_PCM_IFACE in interfaces and "a2dpsrc" in path:
             return path
     return None
 

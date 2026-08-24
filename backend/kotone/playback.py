@@ -661,9 +661,14 @@ class PlaybackController:
         そこで「無音のまま先行再生してデバイスと DAC を起こし、
         ロックが済んでから曲頭へ戻す」ことで、先頭を必ず鳴らす。
         既にデバイスが開いている（再生中／一時停止中）場合は不要なので行わない。
+
+        Bluetooth では行わない。A2DP にサンプリングレートを追従させる必要は
+        無く、逆に曲頭へ戻すシークがストリームの取り直し（bluealsa の
+        "PCM drop"）を招いて、鳴り始めの数秒が途切れる。実機のログで、
+        再生開始の 1〜2 秒後に必ず PCM drop が出ていることを確認した。
         """
         warmup_ms = int(self.settings.get("startup_warmup_ms") or 0)
-        if warmup_ms <= 0:
+        if warmup_ms <= 0 or await self._bluetooth_output():
             await self.mpd.play(position)
             return
 
@@ -876,6 +881,16 @@ class PlaybackController:
         }
         self._cached_state = state
         return state
+
+    async def _bluetooth_output(self) -> bool:
+        """いま音を出している先が Bluetooth か。"""
+        if self.outputs is None:
+            return False
+        try:
+            active = await self.outputs.active()
+        except Exception:
+            return False
+        return bool(active and active.get("bluetooth"))
 
     async def _output_state(self) -> dict[str, Any]:
         """いまどこへ音を出しているか。Bluetooth ならコーデックも添える。

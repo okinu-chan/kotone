@@ -7,7 +7,7 @@
    */
   import Modal from './Modal.svelte';
   import { api } from '../api.js';
-  import { toast } from '../stores.svelte.js';
+  import { settings, toast } from '../stores.svelte.js';
 
   let outputs = $state([]);
   let bt = $state({ adapter: { available: false, powered: false }, devices: [] });
@@ -21,6 +21,9 @@
   const connected = $derived(bt.devices.find((d) => d.connected) ?? null);
   /** いま使われているコーデック（機器側の画面で分からない機種のために出す） */
   const codecName = $derived(bt.codec?.codec ?? null);
+  const qualitySpec = $derived(
+    settings.specs.find((spec) => spec.key === 'bluetooth_prefer_quality') ?? null,
+  );
   const paired = $derived(bt.devices.filter((d) => d.paired));
   const nearby = $derived(bt.devices.filter((d) => !d.paired));
 
@@ -150,6 +153,28 @@
         </label>
       </div>
     </div>
+
+    <!-- 設定項目の自動生成に混ぜると、Bluetooth の話が画面の別々の場所に
+         分かれてしまう。機器の操作と同じカードに置く -->
+    {#if qualitySpec}
+      <div class="field">
+        <div class="label">
+          <span>{qualitySpec.label}</span>
+          <small class="dim">{qualitySpec.description}</small>
+        </div>
+        <div class="control">
+          <label class="switch">
+            <input
+              type="checkbox"
+              checked={settings.values.bluetooth_prefer_quality ?? true}
+              onchange={(event) =>
+                settings.set('bluetooth_prefer_quality', event.currentTarget.checked)}
+            />
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+    {/if}
 
     {#if adapter.powered}
       {#if paired.length > 0}
@@ -360,6 +385,88 @@
   .danger:disabled {
     opacity: 0.45;
     cursor: default;
+  }
+
+  /* 設定のトグル。SettingsView とスコープが別なので、同じ見た目を持たせる */
+  .field {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 12px 0;
+    border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  }
+
+  .label {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+    flex: 1;
+    font-size: var(--fs-lg);
+  }
+
+  .label small {
+    font-size: var(--fs-sm);
+    line-height: 1.6;
+  }
+
+  .control {
+    flex: none;
+    width: 150px;
+  }
+
+  .switch {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    width: 100%;
+    min-height: var(--tap);
+    cursor: pointer;
+  }
+
+  .switch input {
+    position: absolute;
+    opacity: 0;
+    width: 52px;
+    height: 32px;
+    margin: 0;
+    cursor: pointer;
+  }
+
+  .slider {
+    position: relative;
+    width: 52px;
+    height: 32px;
+    border-radius: 999px;
+    background: var(--bg-sunken);
+    border: 1px solid var(--border);
+    transition: background 0.18s;
+  }
+
+  .slider::after {
+    content: '';
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    transition:
+      transform 0.18s,
+      background 0.18s;
+  }
+
+  .switch input:checked + .slider {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .switch input:checked + .slider::after {
+    transform: translateX(20px);
+    background: var(--on-accent);
   }
 
   .confirm-lead {

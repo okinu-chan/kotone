@@ -50,10 +50,6 @@
       title: 'ライブラリ',
       keys: ['artist_separators', 'ignore_leading_article', 'scan_on_start'],
     },
-    {
-      title: 'Bluetooth',
-      keys: ['bluetooth_prefer_quality'],
-    },
     { title: '表示', keys: ['default_library_sort', 'album_layout', 'theme', 'font_size'] },
   ];
 

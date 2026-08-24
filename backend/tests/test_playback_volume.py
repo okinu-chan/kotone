@@ -691,3 +691,49 @@ async def test_pause_is_not_mistaken_for_the_end(db, settings) -> None:
 
     assert not await ctrl._return_to_scope_top(await mpd.status())
     assert mpd.position == 2
+
+
+# ------------------------------- Bluetooth 出力ではウォームアップを行わない
+
+
+class _Outputs:
+    """出力先のフェイク（bluetooth かどうかだけ返す）。"""
+
+    def __init__(self, bluetooth: bool) -> None:
+        self._bluetooth = bluetooth
+
+    async def active(self) -> dict:
+        return {"id": 0, "name": "Bluetooth" if self._bluetooth else "USB DAC",
+                "enabled": True, "bluetooth": self._bluetooth}
+
+
+async def test_no_warmup_on_bluetooth(db, settings) -> None:
+    """Bluetooth では曲頭へのシークをしないこと。
+
+    A2DP にサンプリングレートを追従させる必要は無く、シークがストリームの
+    取り直し（bluealsa の "PCM drop"）を招いて鳴り始めが途切れる。
+    """
+    mpd = FakeMPD(state="stop")
+    ctrl = PlaybackController(
+        mpd, db, FakeRepo({}), settings, EventBus(), outputs=_Outputs(True)
+    )
+    settings.set("startup_warmup_ms", 600)
+
+    await ctrl._start_with_warmup(2)
+
+    assert [c[0] for c in mpd.calls] == ["play"]   # 無音化も seek もしない
+
+
+async def test_warmup_still_runs_on_usb_dac(db, settings) -> None:
+    """USB DAC ではこれまでどおりウォームアップする（曲頭の欠け対策）。"""
+    mpd = FakeMPD(state="stop")
+    mpd.volume = 40
+    ctrl = PlaybackController(
+        mpd, db, FakeRepo({}), settings, EventBus(), outputs=_Outputs(False)
+    )
+    ctrl.user_volume = 45
+    settings.set("startup_warmup_ms", 50)
+
+    await ctrl._start_with_warmup(3)
+
+    assert [c[0] for c in mpd.calls] == ["setvol", "play", "seek", "setvol"]

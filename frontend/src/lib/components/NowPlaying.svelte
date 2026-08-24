@@ -164,6 +164,10 @@
         {#if track.track_gain_db != null}
           <span class="sep">·</span>ラウドネス補正 {track.track_gain_db.toFixed(1)} dB
         {/if}
+        {#if player.state.bluetooth_codec}
+          <!-- 何のコーデックで繋がっているか、機器側で分からない機種が多い -->
+          <span class="sep">·</span>{player.state.bluetooth_codec}
+        {/if}
       </p>
     {/if}
   </div>
