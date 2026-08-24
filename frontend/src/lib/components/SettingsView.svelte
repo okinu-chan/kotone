@@ -1,5 +1,6 @@
 <script>
   /** 設定画面。バックエンドの設定定義（specs）からフォームを自動生成する。 */
+  import AudioOutput from './AudioOutput.svelte';
   import Modal from './Modal.svelte';
   import PageHeader from './PageHeader.svelte';
   import { api } from '../api.js';
@@ -218,6 +219,9 @@
   </section>
 
   <!-- 設定項目 -->
+  <!-- 出力先と Bluetooth。設定項目の自動生成とは作りが違うので別部品にした -->
+  <AudioOutput />
+
   {#each GROUPS as group (group.title)}
     <section class="card">
       <h2>{group.title}</h2>

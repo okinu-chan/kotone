@@ -72,6 +72,17 @@ export const api = {
     get(`/library/initials/${entity}`, { group, initial_by: initialBy }),
   search: (q, limit = 20) => get('/library/search', { q, limit }),
 
+  // --- 出力先・Bluetooth ----------------------------------------------
+  outputs: () => get('/outputs'),
+  selectOutput: (id) => post('/outputs/select', { id }),
+  bluetooth: () => get('/bluetooth'),
+  btPower: (powered) => post('/bluetooth/power', { powered }),
+  btScan: (seconds = 12) => post('/bluetooth/scan', { seconds }),
+  btPair: (address) => post('/bluetooth/pair', { address }),
+  btConnect: (address) => post('/bluetooth/connect', { address }),
+  btDisconnect: (address) => post('/bluetooth/disconnect', { address }),
+  btForget: (address) => post('/bluetooth/forget', { address }),
+
   // --- 再生 -----------------------------------------------------------
   player: () => get('/player'),
   play: () => post('/player/play'),

@@ -9,12 +9,14 @@ import asyncio
 import logging
 from typing import Any
 
+from kotone.bluetooth import BluetoothManager
 from kotone.config import Config
 from kotone.db import Database, apply_migrations
 from kotone.editing import EditingService
 from kotone.events import EventBus
 from kotone.library import LibraryScanner, ScanResult
 from kotone.mpdclient import MPDConnection
+from kotone.outputs import OutputController
 from kotone.playback import PlaybackController
 from kotone.playlists import PlaylistService
 from kotone.repository import LibraryRepository
@@ -144,6 +146,8 @@ class AppContext:
             mpd=self.mpd, db=self.db, repo=self.repo,
             settings=self.settings, events=self.events,
         )
+        self.outputs = OutputController(self.mpd)
+        self.bluetooth = BluetoothManager()
         self.scan = ScanManager(self)
 
     @property

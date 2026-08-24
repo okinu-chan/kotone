@@ -1,0 +1,357 @@
+"""Bluetooth 機器の管理（BlueZ を D-Bus 経由で操作する）。
+
+Pi から BT イヤホン・ヘッドホン・スピーカーへ音を送るための機能。
+``bluetoothctl`` を叩く方法もあるが、対話前提の作りで出力の解析も不安定
+だったため（エージェント登録の取りこぼしを実機で確認）、BlueZ の D-Bus API
+を直接使う。
+
+音の経路
+--------
+``MPD → ALSA(bluealsa) → BlueZ → BT 機器`` の順に流れる。bluealsa の
+``bluealsa`` PCM は「最後に接続した BT 機器」を指すので、機器を替えても
+MPD の設定は書き換えなくてよい。出力の切り替えは MPD の出力の有効・無効
+（:mod:`kotone.outputs`）で行う。
+
+音質について
+------------
+A2DP は必ず再圧縮が入る（可逆ではない）。使えるコーデックは bluealsa の
+ビルドと相手機器の対応で決まり、この環境では LDAC / aptX / aptX-HD / SBC。
+ハイレゾ音源も 48kHz/16bit 以下へ変換されるため、USB DAC と同じ音は出ない。
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from dataclasses import dataclass
+from typing import Any
+
+log = logging.getLogger(__name__)
+
+BLUEZ = "org.bluez"
+ADAPTER_IFACE = "org.bluez.Adapter1"
+DEVICE_IFACE = "org.bluez.Device1"
+PROPS_IFACE = "org.freedesktop.DBus.Properties"
+OBJECT_MANAGER = "org.freedesktop.DBus.ObjectManager"
+
+#: 探索を回す既定の秒数。長すぎると接続中の音が途切れやすい
+DEFAULT_SCAN_SECONDS = 12.0
+
+#: 音を出せる機器だけを出すためのサービス UUID。
+#: A2DP Sink（イヤホン・スピーカー側）を持つ機器が対象。
+A2DP_SINK_UUID = "0000110b-0000-1000-8000-00805f9b34fb"
+
+
+class BluetoothError(RuntimeError):
+    """利用者に見せる想定のエラー。"""
+
+
+@dataclass
+class BluetoothDevice:
+    address: str
+    name: str
+    paired: bool
+    bonded: bool
+    trusted: bool
+    connected: bool
+    icon: str | None
+    rssi: int | None
+    #: 音を受け取れる機器か（A2DP Sink を持つ）
+    audio: bool
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "address": self.address,
+            "name": self.name,
+            "paired": self.paired,
+            "bonded": self.bonded,
+            "trusted": self.trusted,
+            "connected": self.connected,
+            "icon": self.icon,
+            "rssi": self.rssi,
+            "audio": self.audio,
+        }
+
+
+class BluetoothManager:
+    """BlueZ の薄いラッパー。
+
+    D-Bus の接続は使うたびに張り直す。常時つないでおくと、bluetooth
+    サービスの再起動でハンドルが腐ったまま気づけない。
+    """
+
+    def __init__(self) -> None:
+        self._lock = asyncio.Lock()
+        self._scanning = False
+
+    # ------------------------------------------------------------ 基本
+
+    @property
+    def scanning(self) -> bool:
+        return self._scanning
+
+    async def available(self) -> bool:
+        """BlueZ が動いていて、アダプタがあるか。"""
+        try:
+            async with _bus() as bus:
+                return await _find_adapter(bus) is not None
+        except Exception:
+            return False
+
+    async def adapter_info(self) -> dict[str, Any]:
+        async with _bus() as bus:
+            path = await _find_adapter(bus)
+            if path is None:
+                return {"available": False, "powered": False, "name": None}
+            props = await _get_all(bus, path, ADAPTER_IFACE)
+            # D-Bus の値は Variant で包まれている。剥がさないと JSON にできない
+            return {
+                "available": True,
+                "powered": bool(_value(props.get("Powered"), False)),
+                "name": _value(props.get("Alias")) or _value(props.get("Name")),
+                "address": _value(props.get("Address")),
+                "discovering": bool(_value(props.get("Discovering"), False)),
+            }
+
+    async def set_powered(self, powered: bool) -> None:
+        async with _bus() as bus:
+            path = await _require_adapter(bus)
+            await _set(bus, path, ADAPTER_IFACE, "Powered", "b", powered)
+
+    # ------------------------------------------------------------ 一覧
+
+    async def devices(self, *, audio_only: bool = True) -> list[BluetoothDevice]:
+        """既知の機器を返す。接続中・ペアリング済みを先に並べる。"""
+        async with _bus() as bus:
+            found = []
+            for _path, props in await _devices(bus):
+                device = _to_device(props)
+                if audio_only and not device.audio and not device.paired:
+                    continue   # 音を出せない周辺機器は隠す（時計・タグなど）
+                found.append(device)
+
+        found.sort(
+            key=lambda d: (
+                not d.connected,
+                not d.paired,
+                -(d.rssi if d.rssi is not None else -999),
+                d.name.lower(),
+            )
+        )
+        return found
+
+    # ------------------------------------------------------------ 探索
+
+    async def scan(self, seconds: float = DEFAULT_SCAN_SECONDS) -> list[BluetoothDevice]:
+        """近くの機器を探す。終わったら一覧を返す。
+
+        探索中は電波を使うので音が途切れやすい。既定の十数秒で打ち切る。
+        """
+        async with self._lock:
+            self._scanning = True
+            try:
+                async with _bus() as bus:
+                    path = await _require_adapter(bus)
+                    await _call(bus, path, ADAPTER_IFACE, "StartDiscovery")
+                    try:
+                        await asyncio.sleep(max(1.0, min(seconds, 60.0)))
+                    finally:
+                        try:
+                            await _call(bus, path, ADAPTER_IFACE, "StopDiscovery")
+                        except Exception:
+                            log.debug("探索の停止に失敗しました", exc_info=True)
+            finally:
+                self._scanning = False
+        return await self.devices()
+
+    # ------------------------------------------------------ ペアリング・接続
+
+    async def pair(self, address: str) -> BluetoothDevice:
+        """ペアリングして信頼済みにし、接続する。
+
+        イヤホンの多くは暗証番号の入力が要らない（Just Works）。番号の確認を
+        求める機器には対応していない。
+        """
+        async with _bus() as bus:
+            path = await _device_path(bus, address)
+            props = await _get_all(bus, path, DEVICE_IFACE)
+            if not _value(props.get("Paired"), False):
+                try:
+                    await _call(bus, path, DEVICE_IFACE, "Pair", timeout=60.0)
+                except Exception as exc:
+                    raise BluetoothError(_pair_hint(exc)) from exc
+            # 信頼済みにしておくと、次からは自動でつながる
+            await _set(bus, path, DEVICE_IFACE, "Trusted", "b", True)
+
+        await self.connect(address)
+        return await self.device(address)
+
+    async def connect(self, address: str) -> BluetoothDevice:
+        async with _bus() as bus:
+            path = await _device_path(bus, address)
+            try:
+                await _call(bus, path, DEVICE_IFACE, "Connect", timeout=40.0)
+            except Exception as exc:
+                raise BluetoothError(
+                    f"接続できませんでした。機器の電源が入っているか確認してください（{exc}）"
+                ) from exc
+        return await self.device(address)
+
+    async def disconnect(self, address: str) -> BluetoothDevice:
+        async with _bus() as bus:
+            path = await _device_path(bus, address)
+            await _call(bus, path, DEVICE_IFACE, "Disconnect", timeout=20.0)
+        return await self.device(address)
+
+    async def forget(self, address: str) -> None:
+        """ペアリングを解除する（機器側でも解除が必要なことがある）。"""
+        async with _bus() as bus:
+            adapter = await _require_adapter(bus)
+            path = await _device_path(bus, address)
+            await _call(bus, adapter, ADAPTER_IFACE, "RemoveDevice", "o", path)
+
+    async def device(self, address: str) -> BluetoothDevice:
+        async with _bus() as bus:
+            path = await _device_path(bus, address)
+            return _to_device(await _get_all(bus, path, DEVICE_IFACE))
+
+    async def connected_device(self) -> BluetoothDevice | None:
+        """いま音を出せる状態でつながっている機器（無ければ None）。"""
+        for device in await self.devices():
+            if device.connected and device.audio:
+                return device
+        return None
+
+
+# ---------------------------------------------------------------- D-Bus 補助
+
+
+class _bus:
+    """システムバスへの接続を使い捨てで開く。"""
+
+    async def __aenter__(self):
+        from dbus_fast import BusType  # noqa: PLC0415
+        from dbus_fast.aio import MessageBus  # noqa: PLC0415
+
+        try:
+            self._bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+        except Exception as exc:
+            raise BluetoothError(f"Bluetooth に接続できません: {exc}") from exc
+        return self._bus
+
+    async def __aexit__(self, *_exc: object) -> None:
+        self._bus.disconnect()
+
+
+async def _managed_objects(bus: Any) -> dict[str, dict[str, dict[str, Any]]]:
+    introspection = await bus.introspect(BLUEZ, "/")
+    proxy = bus.get_proxy_object(BLUEZ, "/", introspection)
+    manager = proxy.get_interface(OBJECT_MANAGER)
+    return await manager.call_get_managed_objects()
+
+
+async def _find_adapter(bus: Any) -> str | None:
+    for path, interfaces in (await _managed_objects(bus)).items():
+        if ADAPTER_IFACE in interfaces:
+            return path
+    return None
+
+
+async def _require_adapter(bus: Any) -> str:
+    path = await _find_adapter(bus)
+    if path is None:
+        raise BluetoothError("Bluetooth アダプタが見つかりません")
+    return path
+
+
+async def _devices(bus: Any) -> list[tuple[str, dict[str, Any]]]:
+    return [
+        (path, interfaces[DEVICE_IFACE])
+        for path, interfaces in (await _managed_objects(bus)).items()
+        if DEVICE_IFACE in interfaces
+    ]
+
+
+async def _device_path(bus: Any, address: str) -> str:
+    wanted = address.upper()
+    for path, props in await _devices(bus):
+        if str(_value(props.get("Address"), "")).upper() == wanted:
+            return path
+    raise BluetoothError(f"機器が見つかりません: {address}")
+
+
+async def _interface(bus: Any, path: str, iface: str) -> Any:
+    introspection = await bus.introspect(BLUEZ, path)
+    proxy = bus.get_proxy_object(BLUEZ, path, introspection)
+    return proxy.get_interface(iface)
+
+
+async def _get_all(bus: Any, path: str, iface: str) -> dict[str, Any]:
+    props = await _interface(bus, path, PROPS_IFACE)
+    return await props.call_get_all(iface)
+
+
+async def _set(bus: Any, path: str, iface: str, name: str, signature: str, value: Any) -> None:
+    from dbus_fast import Variant  # noqa: PLC0415
+
+    props = await _interface(bus, path, PROPS_IFACE)
+    await props.call_set(iface, name, Variant(signature, value))
+
+
+async def _call(
+    bus: Any, path: str, iface: str, method: str,
+    signature: str | None = None, value: Any = None, *, timeout: float = 30.0,
+) -> Any:
+    target = await _interface(bus, path, iface)
+    name = "call_" + _snake(method)
+    func = getattr(target, name)
+    coro = func(value) if signature else func()
+    return await asyncio.wait_for(coro, timeout=timeout)
+
+
+def _snake(name: str) -> str:
+    out = []
+    for index, char in enumerate(name):
+        if char.isupper() and index:
+            out.append("_")
+        out.append(char.lower())
+    return "".join(out)
+
+
+def _value(raw: Any, default: Any = None) -> Any:
+    """dbus_fast の Variant から中身を取り出す。"""
+    return getattr(raw, "value", raw) if raw is not None else default
+
+
+def _to_device(props: dict[str, Any]) -> BluetoothDevice:
+    address = str(_value(props.get("Address"), ""))
+    uuids = [str(u).lower() for u in _value(props.get("UUIDs"), []) or []]
+    return BluetoothDevice(
+        address=address,
+        name=str(_value(props.get("Alias")) or _value(props.get("Name")) or address),
+        paired=bool(_value(props.get("Paired"), False)),
+        bonded=bool(_value(props.get("Bonded"), False)),
+        trusted=bool(_value(props.get("Trusted"), False)),
+        connected=bool(_value(props.get("Connected"), False)),
+        icon=_value(props.get("Icon")),
+        rssi=_value(props.get("RSSI")),
+        audio=A2DP_SINK_UUID in uuids,
+    )
+
+
+def _pair_hint(exc: Exception) -> str:
+    """ペアリングの失敗を、次に何をすればよいかが分かる文言にする。"""
+    text = str(exc)
+    if "AuthenticationCanceled" in text or "AuthenticationFailed" in text:
+        return (
+            "ペアリングを断られました。機器をペアリングモードにしてから、"
+            "もう一度お試しください"
+        )
+    if "AlreadyExists" in text:
+        return "すでにペアリング済みです"
+    if "TimeoutError" in text or isinstance(exc, TimeoutError):
+        return (
+            "ペアリングが時間内に終わりませんでした。機器をペアリングモードに"
+            "してから、もう一度お試しください"
+        )
+    return f"ペアリングできませんでした（{text}）"

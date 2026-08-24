@@ -64,6 +64,26 @@ audio_output {
     mixer_type      "software"
 }
 
+audio_output {
+    type            "alsa"
+    name            "Bluetooth"
+
+    # 「最後に接続した BT 機器」を自動で指す（bluez-alsa の既定）。
+    # 機器を替えてもここを書き換える必要はない。
+    device          "bluealsa"
+
+    mixer_type      "software"
+
+    # A2DP は 48kHz / 16bit までしか通らないので、変換を許可する。
+    # USB DAC 側のビットパーフェクト設定とは別に指定している。
+    auto_resample   "yes"
+    auto_format     "yes"
+    auto_channels   "yes"
+
+    # 既定は無効。出力の切り替えは KOTONE の設定画面から行う。
+    enabled         "no"
+}
+
 # HTTP ストリーミング等が必要になったらここに audio_output を追加します。
 
 # ---------------------------------------------------------------- デコーダ

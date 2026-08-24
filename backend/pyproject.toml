@@ -21,6 +21,7 @@ dependencies = [
     "pydantic-settings>=2.2",
     "fugashi>=1.3",
     "unidic-lite>=1.0.8",
+    "dbus-fast>=2.21",          # BlueZ を D-Bus 経由で操作する（Bluetooth 出力）
 ]
 
 [project.optional-dependencies]

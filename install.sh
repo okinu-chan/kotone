@@ -99,8 +99,38 @@ apt-get install -y --no-install-recommends \
   build-essential \
   ffmpeg \
   alsa-utils \
+  bluez \
+  bluez-alsa-utils \
+  rfkill \
   ca-certificates \
   curl
+
+# --------------------------------------------------------- Bluetooth 出力
+#
+# Pi から BT イヤホン・スピーカーへ音を送れるようにする。bluez-alsa の
+# 「bluealsa」PCM は最後に接続した機器を指すので、MPD 側は 1 つの出力定義の
+# ままで機器を切り替えられる（詳細は backend/kotone/bluetooth.py）。
+info "Bluetooth 出力を設定します"
+
+# 起動時にアダプタの電源を入れる
+if grep -q '^#AutoEnable=true' /etc/bluetooth/main.conf 2>/dev/null; then
+  sed -i 's/^#AutoEnable=true/AutoEnable=true/' /etc/bluetooth/main.conf
+fi
+
+# Pi は「音を送る側」だけにする。受け側 (a2dp-sink) を有効にしたままだと、
+# 受信音声を DAC へ流す bluealsa-aplay が MPD と出力を奪い合う。
+systemctl disable --now bluealsa-aplay >/dev/null 2>&1 || true
+mkdir -p /etc/systemd/system/bluealsa.service.d
+cat > /etc/systemd/system/bluealsa.service.d/kotone.conf <<'BTEOF'
+# kotone は Pi から BT 機器へ送る用途だけを使う。
+# コーデックは既定だと SBC のみ。LDAC / aptX が使えるビルドなら有効にする
+# （機器が対応していれば自動でそちらが選ばれる）。
+[Service]
+ExecStart=
+ExecStart=/usr/bin/bluealsa -S -p a2dp-source -c sbc -c aptx -c aptx-hd -c ldac --ldac-quality=high --ldac-abr --sbc-quality=xq --a2dp-volume --keep-alive=10
+BTEOF
+systemctl daemon-reload
+systemctl enable --now bluealsa >/dev/null 2>&1 || warn "bluealsa を起動できませんでした"
 
 # ラウドネス計測は rsgain が FFmpeg の ebur128 より約 1.8 倍速い
 # （Pi 4B 実測: 3 並列で 335x 対 182x。18,000 曲で 4.0 時間対 7.4 時間）。
