@@ -449,8 +449,12 @@ class PlaybackController:
         聴いていたアルバムへ戻る手がかりまで消えてしまう。アートワークの
         スワイプは指が滑っただけでも発生するので、終端では受け付けない。
         """
-        if await self.at_queue_end():
+        status = await self.mpd.status()
+        if await self.at_queue_end(status):
             return
+        # 次に鳴る曲は MPD が決めている（シャッフルでも nextsong で分かる）。
+        # 曲送りは出力バッファを捨てるので、送る前に音量を合わせておく
+        await self._preset_loudness(_int_or_none(status.get("nextsong")))
         # ランダム（重複あり）ではキューに次の 1 曲が入っているので、通常の
         # next で進める。進んだ後のイベントで補充される。
         await self.mpd.next()
@@ -488,6 +492,17 @@ class PlaybackController:
             # ランダムでは過去のキューを保持していないため先頭へ戻すだけにする
             await self.mpd.seek(0)
             return
+        if self.order_mode != "shuffle":
+            # シャッフルでは MPD がどの曲へ戻すか分からないので先回りしない。
+            # 曲戻しも出力バッファを捨てるので、送る前に音量を合わせておく
+            position = _int_or_none(status.get("song"))
+            if position is not None:
+                target = position - 1
+                if target < 0:
+                    # 先頭からの曲戻しが末尾へ回るのは範囲リピート中だけ
+                    length = _int_or_none(status.get("playlistlength")) or 0
+                    target = length - 1 if self.repeat_mode == "range" else -1
+                await self._preset_loudness(target)
         await self.mpd.previous()
 
     async def seek(self, seconds: float) -> None:
@@ -667,6 +682,9 @@ class PlaybackController:
         "PCM drop"）を招いて、鳴り始めの数秒が途切れる。実機のログで、
         再生開始の 1〜2 秒後に必ず PCM drop が出ていることを確認した。
         """
+        # 出力バッファは play の直後に一気に埋まる。埋まる前に音量を入れる
+        await self._preset_loudness(position)
+
         warmup_ms = int(self.settings.get("startup_warmup_ms") or 0)
         if warmup_ms <= 0 or await self._bluetooth_output():
             await self.mpd.play(position)
@@ -774,6 +792,38 @@ class PlaybackController:
             return
         self._fade_task = asyncio.create_task(self._fade_volume(current, effective, fade))
 
+    async def _preset_loudness(self, position: int | None) -> None:
+        """これから鳴らす曲の音量を、MPD が音を作り始める前に入れておく。
+
+        再生開始・曲送り・曲戻しでは、MPD は出力バッファを捨てて新しい曲で
+        埋め直す。埋め直しは一瞬で終わるので、鳴り始めてから setvol しても
+        間に合わない。既に埋まった分は補正前の音量のまま出ていく。
+
+        Raspberry Pi 4B + bluez-alsa の実測でバッファは約 1.1 秒あり、曲送りの
+        直後に「1 秒ほど前の曲の音量で鳴ってから補正値へ滑る」形になる。
+        USB DAC もバッファが浅いだけで同じことが起きている。
+
+        曲の自然な変わり目（ギャップレス）ではバッファを捨てないので、この
+        先回りは要らない。書き込み位置と再生位置が同じだけずれているため、
+        変わり目に送った setvol はそのまま新しい曲の頭に当たる（実測で確認）。
+        """
+        if position is None or position < 0:
+            return
+        try:
+            song = await self.mpd.song_at(position)
+        except MPDUnavailable:
+            return
+        path = (song or {}).get("file")
+        if not path:
+            return
+        factor = await self._factor_for_path(path)
+        effective = max(0, min(100, round(self._base_volume() * factor)))
+        if effective == self._expected_volume:
+            return
+        self._cancel_fade()
+        self._expected_volume = effective
+        await self._send_volume(effective)
+
     async def _send_volume(self, value: int) -> None:
         self._last_sent_volume = value
         await self.mpd.set_volume(value)
@@ -815,6 +865,12 @@ class PlaybackController:
         song = await self.mpd.current_song()
         path = song.get("file")
         if not path:
+            return 1.0
+        return await self._factor_for_path(path)
+
+    async def _factor_for_path(self, path: str) -> float:
+        """指定した曲に適用すべき音量倍率。補正が無効なら 1.0。"""
+        if not self.settings.get("loudness_enabled"):
             return 1.0
         track = await asyncio.to_thread(self.repo.get_track_by_path, path)
         if not track:

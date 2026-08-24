@@ -17,6 +17,7 @@ from collections.abc import Awaitable, Callable, Iterable
 from typing import Any
 
 from mpd.asyncio import MPDClient
+from mpd.base import CommandError
 
 log = logging.getLogger(__name__)
 
@@ -153,6 +154,16 @@ class MPDConnection:
 
     async def queue(self) -> list[dict[str, Any]]:
         return await self.command("playlistinfo")
+
+    async def song_at(self, position: int) -> dict[str, Any] | None:
+        """キューの指定位置にある曲（範囲外なら None）。"""
+        if position < 0:
+            return None
+        try:
+            items = await self.command("playlistinfo", position)
+        except CommandError:
+            return None      # キューの外（Bad song index）
+        return items[0] if items else None
 
     async def stats(self) -> dict[str, Any]:
         return await self.command("stats")

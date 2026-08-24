@@ -26,6 +26,8 @@ class FakeMPD:
         self.calls: list[tuple] = []
         self.elapsed = 0.0
         self.song_id = "1"
+        #: キューの中身（先回りの音量設定が引く）
+        self.queue_items: list[dict] = [{"file": "a.flac"}]
         #: 再開時に進んでしまう秒数（実機で 1〜3 秒観測された）
         self.resume_drift = 0.0
 
@@ -42,6 +44,11 @@ class FakeMPD:
 
     async def current_song(self) -> dict:
         return dict(self.song)
+
+    async def song_at(self, position: int) -> dict | None:
+        if position < 0 or position >= len(self.queue_items):
+            return None
+        return dict(self.queue_items[position])
 
     async def set_volume(self, v: int) -> None:
         self.volume = max(0, min(100, int(v)))
@@ -484,15 +491,25 @@ class QueueMPD(FakeMPD):
         self.position = position
         self.length = length
         self.nexted = 0
+        self.previoused = 0
+        self.queue_items = [{"file": f"{i}.flac"} for i in range(length)]
 
     async def status(self) -> dict:
         base = await super().status()
         base.update({"song": self.position, "playlistlength": self.length})
+        if self.position + 1 < self.length:
+            base["nextsong"] = self.position + 1
         return base
 
     async def next(self) -> None:
         self.nexted += 1
         self.position += 1
+        self.calls.append(("next", None))
+
+    async def previous(self) -> None:
+        self.previoused += 1
+        self.position = max(0, self.position - 1)
+        self.calls.append(("previous", None))
 
 
 def _controller(mpd, db, settings) -> PlaybackController:
@@ -737,3 +754,125 @@ async def test_warmup_still_runs_on_usb_dac(db, settings) -> None:
     await ctrl._start_with_warmup(3)
 
     assert [c[0] for c in mpd.calls] == ["setvol", "play", "seek", "setvol"]
+
+
+# ------------------------- 出力バッファが埋まる前に、次の曲の音量を入れておく
+
+
+def _repo_with_gains(gains: dict[str, float]) -> FakeRepo:
+    return FakeRepo(
+        {
+            path: {"track_gain_db": gain, "track_peak": 0.5,
+                   "album_gain_db": gain, "album_peak": 0.5}
+            for path, gain in gains.items()
+        }
+    )
+
+
+async def test_next_sets_the_new_volume_before_skipping(db, settings) -> None:
+    """曲送りでは、next を送る前に次の曲の音量を入れること。
+
+    MPD は曲送りで出力バッファを捨て、新しい曲で一気に埋め直す。埋め直しは
+    一瞬なので、鳴り始めてから setvol しても間に合わない。実機（Bluetooth、
+    バッファ約 1.1 秒）では「1 秒ほど前の曲の音量で鳴ってから補正値へ滑る」
+    形になっていた。
+    """
+    mpd = QueueMPD(position=0, length=3)
+    ctrl = PlaybackController(
+        mpd, db, _repo_with_gains({"1.flac": -6.0}), settings, EventBus()
+    )
+    ctrl.user_volume = 80
+    ctrl._expected_volume = 80
+
+    await ctrl.next()
+
+    # 80 * 10^(-6/20) = 40.1 -> 40
+    assert mpd.calls == [("setvol", 40), ("next", None)]
+
+
+async def test_previous_sets_the_new_volume_before_skipping(db, settings) -> None:
+    mpd = QueueMPD(position=2, length=3)
+    ctrl = PlaybackController(
+        mpd, db, _repo_with_gains({"1.flac": -6.0}), settings, EventBus()
+    )
+    ctrl.user_volume = 80
+    ctrl._expected_volume = 80
+
+    await ctrl.previous()
+
+    assert mpd.calls == [("setvol", 40), ("previous", None)]
+
+
+async def test_previous_within_three_seconds_only_rewinds(db, settings) -> None:
+    """3 秒以上聴いていたら曲頭へ戻すだけ。同じ曲なので音量は動かさない。"""
+    mpd = QueueMPD(position=2, length=3)
+    mpd.elapsed = 10.0
+    ctrl = PlaybackController(
+        mpd, db, _repo_with_gains({"1.flac": -6.0}), settings, EventBus()
+    )
+    ctrl.user_volume = 80
+    ctrl._expected_volume = 80
+
+    await ctrl.previous()
+
+    assert mpd.calls == [("seek", 0)]
+
+
+async def test_shuffle_previous_does_not_guess_the_target(db, settings) -> None:
+    """シャッフルでは MPD がどの曲へ戻すか分からないので先回りしない。"""
+    mpd = QueueMPD(position=2, length=3)
+    ctrl = PlaybackController(
+        mpd, db, _repo_with_gains({"1.flac": -6.0}), settings, EventBus()
+    )
+    ctrl.order_mode = "shuffle"
+    ctrl.user_volume = 80
+    ctrl._expected_volume = 80
+
+    await ctrl.previous()
+
+    assert mpd.calls == [("previous", None)]
+
+
+async def test_next_at_the_end_touches_nothing(db, settings) -> None:
+    """終端では曲送り自体を受け付けないので、音量も動かさない。"""
+    mpd = QueueMPD(position=2, length=3)
+    ctrl = PlaybackController(
+        mpd, db, _repo_with_gains({"1.flac": -6.0}), settings, EventBus()
+    )
+    ctrl.user_volume = 80
+    ctrl._expected_volume = 80
+
+    await ctrl.next()
+
+    assert mpd.calls == []
+
+
+async def test_playback_start_sets_the_volume_before_play(db, settings) -> None:
+    """再生開始も同じ。play より先に、その曲の音量を入れること。"""
+    mpd = QueueMPD(position=0, length=3)
+    mpd.state = "stop"
+    ctrl = PlaybackController(
+        mpd, db, _repo_with_gains({"2.flac": -6.0}), settings, EventBus(),
+        outputs=_Outputs(True),
+    )
+    ctrl.user_volume = 80
+    ctrl._expected_volume = 80
+    settings.set("startup_warmup_ms", 600)
+
+    await ctrl._start_with_warmup(2)
+
+    assert mpd.calls == [("setvol", 40), ("play", 2)]
+
+
+async def test_preset_is_silent_when_the_volume_already_matches(db, settings) -> None:
+    """同じ音量なら setvol を送らない（無駄な mixer イベントを増やさない）。"""
+    mpd = QueueMPD(position=0, length=3)
+    ctrl = PlaybackController(
+        mpd, db, _repo_with_gains({"1.flac": 0.0}), settings, EventBus()
+    )
+    ctrl.user_volume = 80
+    ctrl._expected_volume = 80
+
+    await ctrl.next()
+
+    assert mpd.calls == [("next", None)]
