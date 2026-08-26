@@ -15,7 +15,7 @@
   import VolumeControl from './VolumeControl.svelte';
   import { api } from '../api.js';
   import { formatCodec, formatQuality, formatTime, ORDER_LABELS, REPEAT_LABELS } from '../format.js';
-  import { player, toast } from '../stores.svelte.js';
+  import { player, settings, toast } from '../stores.svelte.js';
   import { router } from '../router.svelte.js';
 
   const track = $derived(player.track);
@@ -161,7 +161,8 @@
       <p class="quality dim tabular">
         {formatCodec(track)}
         {#if formatQuality(track)}<span class="sep">·</span>{formatQuality(track)}{/if}
-        {#if track.track_gain_db != null}
+        <!-- 補正がオフのときの計測値は、いま鳴っている音と関係がない -->
+        {#if settings.values.loudness_enabled && track.track_gain_db != null}
           <span class="sep">·</span>ラウドネス補正 {track.track_gain_db.toFixed(1)} dB
         {/if}
         {#if player.state.bluetooth_codec}
