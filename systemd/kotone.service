@@ -18,6 +18,10 @@ RestartSec=5
 KillSignal=SIGINT
 TimeoutStopSec=20
 
+# 既定の 1024 では、アートワークの配信が重なると届きうる。届いた時点で
+# 画面の配信まで落ちるので（実機で経験）、余裕を持たせておく
+LimitNOFILE=8192
+
 # ログは journald に集約する（journalctl -u kotone で確認）
 StandardOutput=journal
 StandardError=journal

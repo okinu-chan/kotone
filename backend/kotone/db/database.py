@@ -3,12 +3,19 @@
 スレッドごとに接続を持つ（``sqlite3`` の接続はスレッド間で共有できないため）。
 FastAPI の同期エンドポイントはスレッドプールで実行されるので、この方式で
 イベントループをブロックせずに読み書きできる。
+
+スレッドは使い回されるとは限らない。FastAPI（anyio）のワーカースレッドは
+一定時間使われないと終了し、次の要求では別のスレッドが立つ。終わった
+スレッドの接続を閉じずに持ち続けると、ファイルディスクリプタが開いたまま
+積み上がる。実機で 500 本以上たまり、``Too many open files`` でアートワークの
+配信も画面の読み込みも落ちた。そのためスレッドの終了に合わせて必ず閉じる。
 """
 
 from __future__ import annotations
 
 import sqlite3
 import threading
+import weakref
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -39,13 +46,37 @@ def row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
     return dict(row) if row is not None else None
 
 
+class _ThreadConnection:
+    """スレッドローカルに置く接続の器。
+
+    ``threading.local`` に入れた値は、そのスレッドが終わると解放される。
+    接続そのものを入れて別の場所から参照し続けると、解放されないまま
+    ファイルディスクリプタだけが残る。器を挟んで、解放されたその場で閉じる。
+    """
+
+    __slots__ = ("conn", "__weakref__")
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+
+    def close(self) -> None:
+        try:
+            self.conn.close()
+        except Exception:      # インタプリタ終了中は sqlite3 以外も飛びうる
+            pass
+
+    def __del__(self) -> None:
+        self.close()
+
+
 class Database:
     """スレッドローカルな接続プール。"""
 
     def __init__(self, path: Path | str) -> None:
         self.path = str(path)
         self._local = threading.local()
-        self._all: list[sqlite3.Connection] = []
+        # 弱参照で持つ。強く持つとスレッドが終わっても接続が生き続ける
+        self._all: list[weakref.ref[_ThreadConnection]] = []
         self._lock = threading.Lock()
         # インメモリ DB はスレッド間で共有できないため、テスト用に単一接続を使う
         self._shared: sqlite3.Connection | None = None
@@ -56,13 +87,23 @@ class Database:
     def conn(self) -> sqlite3.Connection:
         if self._shared is not None:
             return self._shared
-        conn = getattr(self._local, "conn", None)
-        if conn is None:
-            conn = connect(self.path)
-            self._local.conn = conn
+        holder = getattr(self._local, "holder", None)
+        if holder is None:
+            holder = _ThreadConnection(connect(self.path))
+            self._local.holder = holder
             with self._lock:
-                self._all.append(conn)
-        return conn
+                # 終わったスレッドのぶんを落としてから足す（一覧を伸ばさない）
+                self._all = [ref for ref in self._all if ref() is not None]
+                self._all.append(weakref.ref(holder))
+        return holder.conn
+
+    @property
+    def live_connections(self) -> int:
+        """開いたままの接続の本数（漏れの監視用）。"""
+        if self._shared is not None:
+            return 1
+        with self._lock:
+            return sum(1 for ref in self._all if ref() is not None)
 
     # --- クエリヘルパ ---------------------------------------------------
     def execute(self, sql: str, params: Iterable[Any] = ()) -> sqlite3.Cursor:
@@ -97,11 +138,10 @@ class Database:
 
     def close(self) -> None:
         with self._lock:
-            for conn in self._all:
-                try:
-                    conn.close()
-                except sqlite3.Error:
-                    pass
+            for ref in self._all:
+                holder = ref()
+                if holder is not None:
+                    holder.close()
             self._all.clear()
         if self._shared is not None:
             self._shared.close()
