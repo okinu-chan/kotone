@@ -19,6 +19,19 @@
   import { router } from '../router.svelte.js';
 
   const track = $derived(player.track);
+
+  /**
+   * 表示するラウドネス補正値。
+   *
+   * 補正がオフのときの計測値は、いま鳴っている音と関係がないので出さない。
+   * 「アルバム」設定ではアルバム単位の値が効いているので、そちらを出す。
+   */
+  const loudnessGain = $derived.by(() => {
+    if (!settings.values.loudness_enabled || !track) return null;
+    const gain =
+      settings.values.loudness_mode === 'album' ? track.album_gain_db : track.track_gain_db;
+    return gain == null ? null : gain.toFixed(1);
+  });
   const album = $derived(track ? { id: track.album_id, artwork: track.artwork } : null);
   const progress = $derived(player.duration > 0 ? (player.elapsed / player.duration) * 100 : 0);
 
@@ -161,9 +174,8 @@
       <p class="quality dim tabular">
         {formatCodec(track)}
         {#if formatQuality(track)}<span class="sep">·</span>{formatQuality(track)}{/if}
-        <!-- 補正がオフのときの計測値は、いま鳴っている音と関係がない -->
-        {#if settings.values.loudness_enabled && track.track_gain_db != null}
-          <span class="sep">·</span>ラウドネス補正 {track.track_gain_db.toFixed(1)} dB
+        {#if loudnessGain}
+          <span class="sep">·</span>ラウドネス補正 {loudnessGain} dB
         {/if}
         {#if player.state.bluetooth_codec}
           <!-- 何のコーデックで繋がっているか、機器側で分からない機種が多い -->
