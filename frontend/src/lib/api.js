@@ -10,7 +10,38 @@ class ApiError extends Error {
   }
 }
 
+/** 送り直すまでの間（接続を張り直させるため、ごく短く空ける） */
+const RETRY_DELAY_MS = 150;
+
+/**
+ * 応答を受け取る前に落ちたか。
+ *
+ * ブラウザは一度開いた接続を次の操作でも使い回す。サーバーがその接続を
+ * 閉じるのと同時に送ってしまうと、要求はサーバーへ届かないまま落ちる。
+ * fetch はこれを TypeError として投げる（Safari の "Load failed"）。
+ * 応答が返ってからの失敗は ApiError なので、ここには入らない。
+ */
+const isNetworkError = (error) => error instanceof TypeError;
+
+/**
+ * ``retry`` を付けた要求は、届かずに落ちたときだけ 1 度やり直す。
+ *
+ * 届いていないので送り直して構わない。ただし二度効くと困るもの
+ * （曲送り・再生の切り替え・プレイリストへの追加や削除など）には付けない。
+ * 「この状態にする」という要求だけを対象にしている。
+ */
 async function request(path, options = {}) {
+  const { retry = false, ...init } = options;
+  try {
+    return await send(path, init);
+  } catch (error) {
+    if (!retry || !isNetworkError(error)) throw error;
+    await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+    return send(path, init);
+  }
+}
+
+async function send(path, options) {
   const response = await fetch(`${BASE}${path}`, {
     headers: options.body ? { 'Content-Type': 'application/json' } : undefined,
     ...options,
@@ -36,13 +67,20 @@ async function request(path, options = {}) {
   return payload;
 }
 
+// 読み取りは何度送っても同じなので、常にやり直してよい
 const get = (path, params) => {
   const query = params ? buildQuery(params) : '';
-  return request(`${path}${query}`);
+  return request(`${path}${query}`, { retry: true });
 };
-const post = (path, body) =>
-  request(path, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) });
-const patch = (path, body) => request(path, { method: 'PATCH', body: JSON.stringify(body) });
+const post = (path, body, retry = false) =>
+  request(path, {
+    method: 'POST',
+    retry,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+/** 何度送っても同じ結果になる POST（届かなかったときに送り直す） */
+const setPost = (path, body) => post(path, body, true);
+const patch = (path, body) => request(path, { method: 'PATCH', retry: true, body: JSON.stringify(body) });
 const del = (path) => request(path, { method: 'DELETE' });
 
 function buildQuery(params) {
@@ -74,36 +112,40 @@ export const api = {
 
   // --- 出力先・Bluetooth ----------------------------------------------
   outputs: () => get('/outputs'),
-  selectOutput: (id) => post('/outputs/select', { id }),
+  selectOutput: (id) => setPost('/outputs/select', { id }),
   bluetooth: () => get('/bluetooth'),
-  btPower: (powered) => post('/bluetooth/power', { powered }),
+  btPower: (powered) => setPost('/bluetooth/power', { powered }),
   btScan: (seconds = 12) => post('/bluetooth/scan', { seconds }),
   btPair: (address) => post('/bluetooth/pair', { address }),
-  btConnect: (address) => post('/bluetooth/connect', { address }),
-  btDisconnect: (address) => post('/bluetooth/disconnect', { address }),
-  btForget: (address) => post('/bluetooth/forget', { address }),
+  btConnect: (address) => setPost('/bluetooth/connect', { address }),
+  btDisconnect: (address) => setPost('/bluetooth/disconnect', { address }),
+  btForget: (address) => setPost('/bluetooth/forget', { address }),
 
   // --- 再生 -----------------------------------------------------------
+  // 曲送り・曲戻し・再生の切り替えは、二度効くと 2 曲進んでしまうので
+  // 送り直さない（それ以外は「この状態にする」なので送り直してよい）
   player: () => get('/player'),
-  play: () => post('/player/play'),
-  pause: () => post('/player/pause'),
+  play: () => setPost('/player/play'),
+  pause: () => setPost('/player/pause'),
   toggle: () => post('/player/toggle'),
   next: () => post('/player/next'),
   previous: () => post('/player/previous'),
-  seek: (seconds) => post('/player/seek', { seconds }),
-  setVolume: (volume) => post('/player/volume', { volume }),
+  seek: (seconds) => setPost('/player/seek', { seconds }),
+  setVolume: (volume) => setPost('/player/volume', { volume }),
   playScope: (kind, id, startTrackId) =>
-    post('/player/scope', { kind, id: id === undefined ? null : String(id), start_track_id: startTrackId ?? null }),
+    setPost('/player/scope', { kind, id: id === undefined ? null : String(id), start_track_id: startTrackId ?? null }),
   playTracks: (trackIds, startIndex = 0) =>
-    post('/player/tracks', { track_ids: trackIds, start_index: startIndex }),
-  setRepeat: (mode) => post(`/player/repeat/${mode}`),
-  setOrder: (mode) => post(`/player/order/${mode}`),
+    setPost('/player/tracks', { track_ids: trackIds, start_index: startIndex }),
+  setRepeat: (mode) => setPost(`/player/repeat/${mode}`),
+  setOrder: (mode) => setPost(`/player/order/${mode}`),
   queue: () => get('/player/queue'),
 
   // --- プレイリスト ---------------------------------------------------
   playlists: () => get('/playlists'),
   playlist: (id) => get(`/playlists/${id}`),
-  reorderPlaylists: (ids) => post('/playlists/reorder', { playlist_ids: ids }),
+  // 並び順は「この順にする」なので送り直してよい。追加・削除・移動は
+  // 二度効くと中身が変わるので送り直さない
+  reorderPlaylists: (ids) => setPost('/playlists/reorder', { playlist_ids: ids }),
   createPlaylist: (name, trackIds = []) => post('/playlists', { name, track_ids: trackIds }),
   renamePlaylist: (id, name) => patch(`/playlists/${id}`, { name }),
   deletePlaylist: (id) => del(`/playlists/${id}`),
@@ -111,7 +153,7 @@ export const api = {
   removeFromPlaylist: (id, positions) => post(`/playlists/${id}/remove`, { positions }),
   movePlaylistTrack: (id, from, to) =>
     post(`/playlists/${id}/move`, { from_position: from, to_position: to }),
-  reorderPlaylist: (id, trackIds) => post(`/playlists/${id}/reorder`, { track_ids: trackIds }),
+  reorderPlaylist: (id, trackIds) => setPost(`/playlists/${id}/reorder`, { track_ids: trackIds }),
   exportPlaylistUrl: (id) => `${BASE}/playlists/${id}/export`,
   importPlaylist: async (file, name) => {
     const form = new FormData();
