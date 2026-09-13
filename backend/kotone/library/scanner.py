@@ -95,7 +95,19 @@ class LibraryScanner:
         self._set_state(status="running", phase="ファイルを探索中", processed=0, total=0,
                         started_at=True, error=None)
         try:
-            files = self._walk()
+            files, blind_spots = self._walk()
+            if not files:
+                existing = self.db.scalar("SELECT COUNT(*) FROM tracks") or 0
+                if existing:
+                    # 本当に全曲消したのではなく、ドライブが外れているとみるほうが
+                    # ずっと自然。ここで続けるとライブラリが空になる
+                    raise RuntimeError(
+                        f"音楽ディレクトリに曲が 1 つも見つかりません（ライブラリには "
+                        f"{existing} 曲あります）。ドライブが外れている可能性があるため、"
+                        "ライブラリを空にせずに中止しました。"
+                    )
+            for spot in blind_spots:
+                result.errors.append(f"読み込めない場所があります: {spot or '（全体）'}")
             total = len(files)
             self._set_state(phase="タグを読み込み中", total=total)
             log.info("ライブラリスキャン開始: %d ファイル (full=%s)", total, full)
@@ -124,7 +136,7 @@ class LibraryScanner:
 
             self.db.commit()
 
-            result.removed = self._remove_missing(seen_paths)
+            result.removed = self._remove_missing(seen_paths, blind_spots)
             self._infer_album_artists()
             self._prune_orphans()
             self.db.commit()
@@ -255,13 +267,34 @@ class LibraryScanner:
 
     # =============================================================== 走査
 
-    def _walk(self) -> list[tuple[str, Path, os.stat_result]]:
+    def _walk(self) -> tuple[list[tuple[str, Path, os.stat_result]], list[str]]:
+        """音楽ディレクトリを走査する。
+
+        2 つ目の返り値は「読めなかった場所」（音楽ディレクトリからの相対パス。
+        空文字は全体）。``os.walk`` は既定で読めないディレクトリを黙って飛ばす
+        ため、そのままだとドライブの不調で読めなかった曲まで「消えた」ことに
+        なり、ライブラリから削除されてしまう。読めなかった場所にある曲は、
+        見つからなくても削除しない。
+        """
         root = self.config.music_dir
         if not root.is_dir():
             raise FileNotFoundError(f"音楽ディレクトリが見つかりません: {root}")
+        try:
+            with os.scandir(root) as it:
+                next(it, None)
+        except OSError as exc:
+            raise OSError(f"音楽ディレクトリを読み込めません: {root} ({exc.strerror})") from exc
+
+        blind_spots: list[str] = []
+
+        def on_error(error: OSError) -> None:
+            where = Path(error.filename) if error.filename else root
+            spot = _relative_or_root(where, root)
+            blind_spots.append(spot)
+            log.warning("読み込めないディレクトリがあります: %s (%s)", where, error.strerror)
 
         files: list[tuple[str, Path, os.stat_result]] = []
-        for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        for dirpath, dirnames, filenames in os.walk(root, followlinks=False, onerror=on_error):
             dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
             for filename in sorted(filenames):
                 if filename.startswith("."):
@@ -269,13 +302,14 @@ class LibraryScanner:
                 abs_path = Path(dirpath) / filename
                 if not is_audio_file(abs_path):
                     continue
+                rel_path = abs_path.relative_to(root).as_posix()
                 try:
                     stat = abs_path.stat()
                 except OSError:
+                    blind_spots.append(rel_path)   # 在るのに読めない。消したのではない
                     continue
-                rel_path = abs_path.relative_to(root).as_posix()
                 files.append((rel_path, abs_path, stat))
-        return files
+        return files, blind_spots
 
     # =========================================================== 1 曲の同期
 
@@ -549,12 +583,16 @@ class LibraryScanner:
 
     # ============================================================ 後始末
 
-    def _remove_missing(self, seen_paths: set[str]) -> int:
+    def _remove_missing(
+        self, seen_paths: set[str], blind_spots: list[str] | None = None
+    ) -> int:
+        """見つからなかった曲をライブラリから消す。読めなかった場所の曲は残す。"""
         self._set_state(phase="削除された曲を整理中")
         removed = 0
+        spots = blind_spots or []
         rows = self.db.query("SELECT id, path FROM tracks")
         for row in rows:
-            if row["path"] in seen_paths:
+            if row["path"] in seen_paths or _is_under(row["path"], spots):
                 continue
             self.db.execute("DELETE FROM tracks WHERE id = ?", (row["id"],))
             removed += 1
@@ -890,3 +928,17 @@ def _format_remaining(seconds: float) -> str:
     if seconds >= 60:
         return f"残り約 {seconds / 60:.0f} 分"
     return f"残り約 {seconds:.0f} 秒"
+
+
+def _relative_or_root(path: Path, root: Path) -> str:
+    """音楽ディレクトリからの相対パス（音楽ディレクトリそのものは空文字）。"""
+    try:
+        rel = path.relative_to(root).as_posix()
+    except ValueError:
+        return ""
+    return "" if rel == "." else rel
+
+
+def _is_under(path: str, spots: list[str]) -> bool:
+    """``path`` が、読めなかった場所のどれかの中にあるか（空文字は全体）。"""
+    return any(spot == "" or path == spot or path.startswith(spot + "/") for spot in spots)

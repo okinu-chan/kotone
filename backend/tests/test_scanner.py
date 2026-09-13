@@ -609,3 +609,103 @@ def test_adding_a_track_to_an_existing_album_is_not_recent(
     finally:
         LIBRARY.pop(rel, None)
         path.unlink(missing_ok=True)
+
+
+# ------------------------------------- ドライブが読めないときにライブラリを消さない
+#
+# 2026-09-13、USB の過電流で音楽用 SSD が外れ、どのファイルも読み込みエラーに
+# なった。os.walk は既定で読めないディレクトリを黙って飛ばすため、この状態で
+# スキャンすると全曲が「消えた」ことになり、ライブラリから削除されてしまう。
+
+
+def _walk_failing_at(dirname: str):
+    """``dirname`` のディレクトリだけ読み込みエラーにする os.walk。"""
+    import os
+
+    real_walk = os.walk
+
+    def walk(top, **kwargs):  # noqa: ANN001, ANN202
+        onerror = kwargs.get("onerror")
+        for dirpath, dirnames, filenames in real_walk(top, **kwargs):
+            if dirname in dirnames:
+                dirnames.remove(dirname)
+                if onerror is not None:
+                    onerror(OSError(5, "Input/output error", str(Path(dirpath) / dirname)))
+            yield dirpath, dirnames, filenames
+
+    return walk
+
+
+def test_tracks_in_unreadable_directories_are_kept(
+    scan: LibraryScanner, db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scan.scan()
+    monkeypatch.setattr(scanner_module.os, "walk", _walk_failing_at("Radiohead"))
+
+    result = scan.scan()
+
+    assert result.removed == 0
+    assert db.query_one("SELECT id FROM tracks WHERE title = 'Airbag'") is not None
+    assert any("Radiohead" in error for error in result.errors)
+
+
+def test_really_deleted_files_are_still_removed_elsewhere(
+    scan: LibraryScanner, library: Config, db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """読めない場所があっても、ほかの場所で本当に消した曲は片付ける。"""
+    scan.scan()
+    (library.music_dir / "宇多田ヒカル/First Love/02 First Love.flac").unlink()
+    monkeypatch.setattr(scanner_module.os, "walk", _walk_failing_at("Radiohead"))
+
+    result = scan.scan()
+
+    assert result.removed == 1
+    assert db.query_one("SELECT id FROM tracks WHERE title = 'Airbag'") is not None
+
+
+def test_scan_that_finds_nothing_does_not_empty_the_library(
+    scan: LibraryScanner, library: Config, db: Database
+) -> None:
+    scan.scan()
+    for rel_path in LIBRARY:
+        (library.music_dir / rel_path).unlink()
+
+    with pytest.raises(RuntimeError, match="ライブラリを空にせずに中止"):
+        scan.scan()
+
+    assert db.scalar("SELECT COUNT(*) FROM tracks") == len(LIBRARY)
+
+
+def test_unreadable_music_directory_aborts_the_scan(
+    scan: LibraryScanner, db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scan.scan()
+
+    def broken(path):  # noqa: ANN001, ANN202
+        raise OSError(5, "Input/output error")
+
+    monkeypatch.setattr(scanner_module.os, "scandir", broken)
+
+    with pytest.raises(OSError, match="音楽ディレクトリを読み込めません"):
+        scan.scan()
+
+    assert db.scalar("SELECT COUNT(*) FROM tracks") == len(LIBRARY)
+
+
+def test_first_scan_of_an_empty_directory_is_fine(
+    config: Config, db: Database, settings: SettingsStore
+) -> None:
+    """ライブラリが空なら、曲が無いのは異常ではない。"""
+    settings.set("rsgain_enabled", False)
+    result = LibraryScanner(db, config, settings).scan()
+    assert result.added == 0
+
+
+def test_blind_spot_matching() -> None:
+    assert scanner_module._is_under("Radiohead/OK Computer/01.flac", ["Radiohead"])
+    assert scanner_module._is_under("a.flac", ["a.flac"])
+    assert scanner_module._is_under("anything.flac", [""])        # 全体が読めない
+    assert not scanner_module._is_under("Radiohead2/x.flac", ["Radiohead"])
+    root = Path("/music")
+    assert scanner_module._relative_or_root(root, root) == ""
+    assert scanner_module._relative_or_root(root / "a" / "b", root) == "a/b"
