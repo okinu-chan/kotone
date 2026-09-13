@@ -62,6 +62,8 @@ class PlayerStore {
         scan.update(message.payload);
       } else if (message.type === 'settings') {
         settings.values = { ...settings.values, ...message.payload.values };
+      } else if (message.type === 'storage') {
+        storage.update(message.payload);
       }
     };
     socket.onclose = () => {
@@ -148,6 +150,40 @@ class ScanStore {
 }
 
 export const scan = new ScanStore();
+
+/* ------------------------------------------------------- 音楽用ドライブ */
+
+/**
+ * 音楽用ドライブの状態。
+ *
+ * ドライブが外れると、どの曲も再生が始まらなくなる。画面からは原因が
+ * 分からないので、外れている間は帯で知らせ、戻ったら一言添える。
+ */
+class StorageStore {
+  available = $state(true);
+  message = $state(null);
+  recovery = $state(null);
+  /** 状態を受け取ったことがあるか（接続直後の初期値で通知を出さない） */
+  #known = false;
+
+  update(payload) {
+    if (!payload) return;
+    const wasAvailable = this.available;
+    this.available = payload.available !== false;
+    this.message = payload.message ?? null;
+    this.recovery = payload.recovery ?? null;
+    if (this.#known && !wasAvailable && this.available) {
+      toast.info(
+        this.recovery?.state === 'recovered'
+          ? '音楽用ドライブを自動で復旧しました'
+          : '音楽用ドライブが読めるようになりました',
+      );
+    }
+    this.#known = true;
+  }
+}
+
+export const storage = new StorageStore();
 
 /* ------------------------------------------------------------------ 設定 */
 

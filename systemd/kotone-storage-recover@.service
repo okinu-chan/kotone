@@ -1,0 +1,13 @@
+[Unit]
+Description=kotone — 音楽用ドライブの自動復旧 (%i)
+# 起動時のマウントが済んでから動く（systemd の点検と重ねない）
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/kotone-storage-recover %i
+# 大きなドライブの点検は時間がかかることがある
+TimeoutStartSec=1h
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=kotone-storage

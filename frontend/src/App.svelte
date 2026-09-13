@@ -11,6 +11,7 @@
   import ScopeView from './lib/components/ScopeView.svelte';
   import SearchView from './lib/components/SearchView.svelte';
   import SettingsView from './lib/components/SettingsView.svelte';
+  import StorageBanner from './lib/components/StorageBanner.svelte';
   import TabBar from './lib/components/TabBar.svelte';
   import Toast from './lib/components/Toast.svelte';
   import { router } from './lib/router.svelte.js';
@@ -25,6 +26,7 @@
 </script>
 
 <div class="app" class:with-mini={!onNowPlaying}>
+  <StorageBanner />
   <ScanBanner />
 
   <main>

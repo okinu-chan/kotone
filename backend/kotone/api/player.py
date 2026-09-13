@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from kotone.api.deps import Ctx, MpdCtx, mpd_error
 from kotone.mpdclient import MPDUnavailable
+from kotone.storage import StorageUnavailable
 
 router = APIRouter(prefix="/player", tags=["player"])
 
@@ -44,6 +45,7 @@ async def state(ctx: Ctx) -> dict[str, Any]:
 
 @router.post("/play")
 async def play(ctx: MpdCtx) -> dict[str, Any]:
+    await _require_storage(ctx)
     return await _run(ctx, ctx.player.play())
 
 
@@ -54,6 +56,13 @@ async def pause(ctx: MpdCtx) -> dict[str, Any]:
 
 @router.post("/toggle")
 async def toggle(ctx: MpdCtx) -> dict[str, Any]:
+    # 止める操作は、ドライブが読めなくても受け付ける
+    try:
+        playing = (await ctx.mpd.status()).get("state") == "play"
+    except MPDUnavailable as exc:
+        raise mpd_error(exc) from exc
+    if not playing:
+        await _require_storage(ctx)
     return await _run(ctx, ctx.player.toggle())
 
 
@@ -64,11 +73,13 @@ async def stop(ctx: MpdCtx) -> dict[str, Any]:
 
 @router.post("/next")
 async def next_track(ctx: MpdCtx) -> dict[str, Any]:
+    await _require_storage(ctx)
     return await _run(ctx, ctx.player.next())
 
 
 @router.post("/previous")
 async def previous_track(ctx: MpdCtx) -> dict[str, Any]:
+    await _require_storage(ctx)
     return await _run(ctx, ctx.player.previous())
 
 
@@ -85,6 +96,7 @@ async def set_volume(ctx: MpdCtx, body: VolumeRequest) -> dict[str, Any]:
 @router.post("/scope")
 async def play_scope(ctx: MpdCtx, body: PlayScopeRequest) -> dict[str, Any]:
     """再生スコープを読み込んで再生を開始する（要件 3.1）。"""
+    await _require_storage(ctx)
     try:
         await ctx.player.play_scope(body.kind, body.id, start_track_id=body.start_track_id)
     except ValueError as exc:
@@ -97,6 +109,7 @@ async def play_scope(ctx: MpdCtx, body: PlayScopeRequest) -> dict[str, Any]:
 @router.post("/tracks")
 async def play_tracks(ctx: MpdCtx, body: PlayTracksRequest) -> dict[str, Any]:
     """任意の曲リストを再生する（検索結果からの再生など）。"""
+    await _require_storage(ctx)
     try:
         await ctx.player.play_tracks(body.track_ids, start_index=body.start_index)
     except ValueError as exc:
@@ -143,6 +156,19 @@ async def queue(ctx: MpdCtx) -> dict[str, Any]:
             }
         )
     return {"items": items, "total": len(items)}
+
+
+async def _require_storage(ctx: Ctx) -> None:
+    """鳴らし始める前に、音楽用ドライブが読めることを確かめる。
+
+    読めないまま MPD に渡すと、再生が始まらないまま何も起きない（MPD の
+    エラーは画面に出ない）。2026-09-13 に SSD が外れたときはこの形で、
+    原因の手がかりが無かった。理由を添えて断る。
+    """
+    try:
+        await ctx.storage.ensure_available()
+    except StorageUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 async def _run(ctx: Ctx, coro: Any) -> dict[str, Any]:

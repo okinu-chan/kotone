@@ -1,0 +1,182 @@
+#!/usr/bin/env bash
+#
+# 音楽用ドライブの自動復旧（root で動く）。
+#
+#   kotone-storage-recover hotplug   ドライブが現れたとき（udev から）
+#   kotone-storage-recover timer     2 分おきの見回り（タイマーから）
+#
+# 2026-09-13、USB の過電流で音楽用 SSD が一瞬外れ、別の名前（sda → sdb）で
+# 戻ってきた。ところが /mnt/music は外れた古いデバイスに付いたままで、
+# どの曲も読めなくなった。手で「外す → 点検 → 付け直す」をして復旧した。
+# ここではそれを自動で行う。何もすることが無ければ、何もせずに終わる。
+#
+# 手を出さない場面:
+#   * 起動直後（systemd 自身がマウントと点検を進めている）
+#   * 見回りで、付いていないだけのドライブ（人が外した可能性がある）
+#   * 同じデバイスのまま使用中で外せないとき（点検すると壊しうる）
+#   * 点検で自動では直せない問題が見つかったとき
+#   * 1 時間に 3 回を超えたとき（機材の問題。繰り返さずに人に任せる）
+#
+set -uo pipefail
+
+MODE="${1:-timer}"
+ENV_FILE="${KOTONE_ENV_FILE:-/etc/kotone/kotone.env}"
+FSTAB="${KOTONE_FSTAB:-/etc/fstab}"
+STATE_DIR="${KOTONE_RECOVER_STATE_DIR:-/run/kotone-storage}"
+BOOT_GRACE_SECONDS="${KOTONE_RECOVER_BOOT_GRACE:-120}"
+MAX_ATTEMPTS=3
+WINDOW_SECONDS=3600
+PROBE_TIMEOUT=10
+
+mkdir -p "$STATE_DIR"
+chmod 755 "$STATE_DIR"
+
+exec 9>"$STATE_DIR/lock"
+flock -n 9 || exit 0      # 別の呼び出しが動いている
+
+DEV=""
+
+# KOTONE が読む状態ファイル。文言はこのスクリプトの固定文なので、そのまま埋める
+write_status() {
+  local tmp="$STATE_DIR/status.json.tmp"
+  printf '{"state": "%s", "message": "%s", "device": "%s", "at": %s}\n' \
+    "$1" "$2" "$DEV" "$(date +%s)" > "$tmp"
+  chmod 644 "$tmp"
+  mv -f "$tmp" "$STATE_DIR/status.json"
+}
+
+fail() {
+  write_status failed "$1"
+  echo "復旧できませんでした: $1" >&2
+  exit 1
+}
+
+probe() { timeout "$PROBE_TIMEOUT" ls -f "$MUSIC_DIR" >/dev/null 2>&1; }
+
+# ------------------------------------------------------------ 見張る対象
+
+MUSIC_DIR="${KOTONE_MUSIC_DIR:-}"
+if [[ -z "$MUSIC_DIR" && -r "$ENV_FILE" ]]; then
+  MUSIC_DIR="$(sed -n 's/^KOTONE_MUSIC_DIR=//p' "$ENV_FILE" | tail -1)"
+  MUSIC_DIR="${MUSIC_DIR%\"}"; MUSIC_DIR="${MUSIC_DIR#\"}"
+fi
+[[ -n "$MUSIC_DIR" ]] || exit 0
+
+# fstab から、音楽ディレクトリを含む（いちばん深い）マウント先を探す
+fstab_entry() {
+  awk -v dir="$MUSIC_DIR" '
+    /^[[:space:]]*#/ || NF < 3 { next }
+    {
+      t = $2; gsub(/\\040/, " ", t); sub(/\/+$/, "", t)
+      if (t == "" || t == "none") next
+      if (dir == t || index(dir, t "/") == 1) {
+        if (length(t) > best) {
+          best = length(t); spec = $1; target = t; fs = $3
+          opts = (NF >= 4 ? $4 : "defaults")
+        }
+      }
+    }
+    END { if (best) printf "%s\t%s\t%s\t%s\n", spec, target, fs, opts }
+  ' "$FSTAB"
+}
+IFS=$'\t' read -r SPEC TARGET FSTYPE OPTS < <(fstab_entry) || true
+# 音楽が別のドライブに無ければ、見張るものが無い
+[[ -n "${TARGET:-}" ]] || exit 0
+
+# -------------------------------------------------------------- いまの状態
+
+MNT_MAJMIN="$(findmnt -n -o MAJ:MIN --mountpoint "$TARGET" 2>/dev/null | tail -1 | tr -d ' ')"
+MNT_OPTS="$(findmnt -n -o OPTIONS --mountpoint "$TARGET" 2>/dev/null | tail -1)"
+
+# いま付いているものが健全かどうかは、それ自体だけで判断する。
+# 同じ ID のデバイスがほかに見えても（複製したドライブ、loop の上の
+# device-mapper など）、健全なものは決して外さない。
+# （模擬試験で、loop の ID を拾って健全なマウントを外してしまったことがある）
+if [[ -n "$MNT_MAJMIN" ]]; then
+  if [[ -e "/sys/dev/block/$MNT_MAJMIN" && "$MNT_OPTS" != *shutdown* ]] && probe; then
+    # 正常。前回の失敗や待ちの記録が残っていれば片付ける
+    if [[ -f "$STATE_DIR/status.json" ]] && ! grep -q '"state": "recovered"' "$STATE_DIR/status.json"; then
+      write_status ok "音楽用ドライブは正常です。"
+    fi
+    exit 0
+  fi
+  STALE=1
+else
+  STALE=0
+  # 付いていないだけのドライブ。見回りでは付けない（人が外したのかもしれない）
+  [[ "$MODE" == "hotplug" ]] || exit 0
+  # 起動直後は systemd に任せる（点検とマウントを二重に走らせない）
+  uptime_s="$(cut -d. -f1 /proc/uptime)"
+  (( uptime_s >= BOOT_GRACE_SECONDS )) || exit 0
+fi
+
+# ------------------------------------------------------------ 付け直す先
+
+# 同じ ID を持つデバイスを全部挙げ、別のデバイスの下敷きになっているもの
+# （device-mapper の下の loop など）は除く。1 つに決まらなければ推測で選ばない
+candidates() {
+  case "$SPEC" in
+    /dev/*) [[ -b "$SPEC" ]] && printf '%s\n' "$SPEC" ;;
+    *) blkid -c /dev/null -o device -t "$SPEC" 2>/dev/null ;;
+  esac
+}
+CANDIDATES=()
+while IFS= read -r dev; do
+  [[ -b "$dev" ]] || continue
+  majmin="$(lsblk -dn -o MAJ:MIN "$dev" 2>/dev/null | tr -d ' ')"
+  [[ -n "$majmin" ]] || continue
+  [[ -z "$(ls -A "/sys/dev/block/$majmin/holders" 2>/dev/null)" ]] || continue
+  CANDIDATES+=("$dev")
+done < <(candidates)
+
+if (( ${#CANDIDATES[@]} == 0 )); then
+  # ドライブ自体が見当たらない。戻ってきたら udev がまた呼ぶ
+  (( STALE )) && write_status waiting "音楽用ドライブが見当たりません。再接続を待っています。"
+  exit 0
+fi
+(( ${#CANDIDATES[@]} == 1 )) \
+  || fail "同じ ID のドライブが複数見つかったため、自動では選べませんでした。"
+DEV="${CANDIDATES[0]}"
+DEV_MAJMIN="$(lsblk -dn -o MAJ:MIN "$DEV" 2>/dev/null | tr -d ' ')"
+
+# ----------------------------------------------------------------- 回数の上限
+
+now="$(date +%s)"
+HISTORY="$STATE_DIR/history"
+attempts=0
+[[ -f "$HISTORY" ]] && attempts="$(awk -v n="$now" -v w="$WINDOW_SECONDS" '$1 > n - w' "$HISTORY" | wc -l)"
+if (( attempts >= MAX_ATTEMPTS )); then
+  fail "短い時間に何度も外れたため、自動での復旧を止めました。ケーブルと給電を確認してください。"
+fi
+echo "$now" >> "$HISTORY"
+
+# ---------------------------------------------------------------------- 復旧
+
+echo "音楽用ドライブを復旧します: ${DEV} → ${TARGET}（${MODE}）"
+write_status recovering "音楽用ドライブを自動で復旧しています。"
+
+if (( STALE )); then
+  if ! umount "$TARGET" 2>/dev/null; then
+    # デバイスが替わっているなら、古いほうはもう書き込めないので切り離してよい。
+    # 同じデバイスのまま使用中なら、切り離して点検すると壊しうるので止める
+    [[ "$MNT_MAJMIN" != "$DEV_MAJMIN" ]] \
+      || fail "音楽用ドライブが使用中のため、自動では外せませんでした。"
+    umount -l "$TARGET" || fail "古い接続を外せませんでした。"
+  fi
+fi
+findmnt -n --mountpoint "$TARGET" >/dev/null 2>&1 && fail "古い接続を外せませんでした。"
+
+case "$FSTYPE" in
+  ext2|ext3|ext4)
+    e2fsck -p "$DEV"
+    rc=$?
+    echo "e2fsck: 終了コード ${rc}"
+    (( rc < 4 )) || fail "ドライブの点検で、自動では直せない問題が見つかりました。"
+    ;;
+esac
+
+mount -t "$FSTYPE" -o "$OPTS" "$DEV" "$TARGET" || fail "音楽用ドライブを付け直せませんでした。"
+probe || fail "付け直しましたが、まだ読み込めません。"
+
+write_status recovered "音楽用ドライブを自動で復旧しました。"
+echo "復旧しました: ${DEV} → ${TARGET}"

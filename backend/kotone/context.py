@@ -22,6 +22,7 @@ from kotone.playlists import PlaylistService
 from kotone.repository import LibraryRepository
 from kotone.settings import SettingsStore
 from kotone.stats import StatsStore
+from kotone.storage import StorageMonitor
 from kotone.text import get_reading_generator
 
 log = logging.getLogger(__name__)
@@ -42,6 +43,9 @@ class ScanManager:
     async def start(self, *, full: bool = False) -> None:
         if self.running:
             raise RuntimeError("すでにスキャンが実行中です")
+        # ドライブが読めない間にスキャンすると、全曲が「消えた」ことになって
+        # ライブラリから削除されてしまう。読めないなら始めない
+        await self._ctx.storage.ensure_available()
         self._loop = asyncio.get_running_loop()
         self._task = asyncio.create_task(self._run(full=full), name="library-scan")
 
@@ -49,6 +53,7 @@ class ScanManager:
         """ラウドネス計測だけをバックグラウンドで走らせる。"""
         if self.running:
             raise RuntimeError("すでにスキャンが実行中です")
+        await self._ctx.storage.ensure_available()
         self._loop = asyncio.get_running_loop()
         self._task = asyncio.create_task(
             self._run_loudness(remeasure=remeasure), name="loudness-scan"
@@ -139,6 +144,7 @@ class AppContext:
         self.playlists = PlaylistService(self.db, self.settings)
         self.editing = EditingService(self.db, self.settings)
         self.events = EventBus()
+        self.storage = StorageMonitor(config.music_dir, self.events)
         self.mpd = MPDConnection(
             host=config.mpd_host, port=config.mpd_port, password=config.mpd_password
         )
@@ -159,14 +165,17 @@ class AppContext:
         return get_reading_generator().available
 
     async def startup(self) -> None:
+        # スキャンより先に見張りを始める（読めないドライブでスキャンしないため）
+        await self.storage.start()
         await self.mpd.start()
         await self.player.start()
         if self.settings.get("scan_on_start"):
             try:
                 await self.scan.start()
-            except RuntimeError:
-                pass
+            except RuntimeError as exc:
+                log.warning("起動時のスキャンを見送りました: %s", exc)
 
     async def shutdown(self) -> None:
+        await self.storage.stop()
         await self.mpd.close()
         self.db.close()

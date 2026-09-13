@@ -1,0 +1,6 @@
+# kotone: ファイルシステムを持つドライブが現れたら、音楽用ドライブの復旧を試みる。
+#
+# USB の瞬断で外れたドライブは、別の名前（sda → sdb など）で戻ってくる。
+# その瞬間に kotone-storage-recover を呼び、古い接続を外して付け直す。
+# 音楽用ドライブでなければ、スクリプトは何もせずに終わる。
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_FS_UUID}=="?*", TAG+="systemd", ENV{SYSTEMD_WANTS}+="kotone-storage-recover@hotplug.service"

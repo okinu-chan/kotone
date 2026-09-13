@@ -1,7 +1,8 @@
 """WebSocket による状態 push。
 
-接続直後に現在の再生状態とスキャン状態を 1 度送り、以降は差分イベントを流す。
-クライアントは ``{"type": "player" | "scan" | "settings", "payload": {...}}``
+接続直後に現在の再生状態・スキャン状態・音楽用ドライブの状態を 1 度送り、
+以降は差分イベントを流す。クライアントは
+``{"type": "player" | "scan" | "settings" | "storage", "payload": {...}}``
 という形のメッセージを受け取る。
 """
 
@@ -37,6 +38,10 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             except Exception:  # pragma: no cover - MPD 未接続時
                 await websocket.send_json({"type": "player", "payload": {"connected": False}})
             await websocket.send_json({"type": "scan", "payload": ctx.scan.state()})
+            # 外れている最中に開いた画面にも、すぐ帯を出す
+            await websocket.send_json(
+                {"type": "storage", "payload": ctx.storage.status.as_dict()}
+            )
 
             receiver = asyncio.create_task(_drain(websocket))
             try:

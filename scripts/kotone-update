@@ -59,6 +59,16 @@ info "Python の依存関係を更新します"
 "${VENV}/bin/pip" install --quiet --upgrade pip wheel
 "${VENV}/bin/pip" install --quiet --upgrade "${PREFIX}/backend"
 
+# ------------------------------------------ 音楽用ドライブの自動復旧
+
+# 以前のバージョンからの更新でも入るように、毎回入れ直す
+info "音楽用ドライブの自動復旧を更新します"
+install -m 755 "${PREFIX}/scripts/kotone-storage-recover" /usr/local/sbin/kotone-storage-recover
+install -m 644 "${PREFIX}/systemd/kotone-storage-recover@.service" /etc/systemd/system/
+install -m 644 "${PREFIX}/systemd/kotone-storage-recover.timer" /etc/systemd/system/
+install -m 644 "${PREFIX}/config/99-kotone-storage.rules" /etc/udev/rules.d/
+udevadm control --reload-rules >/dev/null 2>&1 || true
+
 # ------------------------------------------------------- マイグレーション
 
 info "DB マイグレーションを適用します"
@@ -68,6 +78,8 @@ sudo -u "$SERVICE_USER" "${VENV}/bin/kotone-cli" migrate
 
 info "サービスを再起動します"
 systemctl daemon-reload
+systemctl enable --now kotone-storage-recover.timer >/dev/null 2>&1 \
+  || warn "音楽用ドライブの見回りタイマーを有効にできませんでした"
 systemctl restart kotone
 
 sleep 2

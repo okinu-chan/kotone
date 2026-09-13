@@ -270,8 +270,18 @@ sed -e "s|@PREFIX@|${PREFIX}|g" \
 install -m 755 "${PREFIX}/scripts/kotone-update" /usr/local/bin/kotone-update
 install -m 755 "${PREFIX}/scripts/kotone-cli-wrapper" /usr/local/bin/kotone-cli
 
+# 音楽用ドライブの自動復旧（USB の瞬断で外れたドライブを付け直す）
+info "音楽用ドライブの自動復旧を登録します"
+install -m 755 "${PREFIX}/scripts/kotone-storage-recover" /usr/local/sbin/kotone-storage-recover
+install -m 644 "${PREFIX}/systemd/kotone-storage-recover@.service" /etc/systemd/system/
+install -m 644 "${PREFIX}/systemd/kotone-storage-recover.timer" /etc/systemd/system/
+install -m 644 "${PREFIX}/config/99-kotone-storage.rules" /etc/udev/rules.d/
+udevadm control --reload-rules >/dev/null 2>&1 || true
+
 systemctl daemon-reload
 systemctl enable kotone >/dev/null 2>&1
+systemctl enable --now kotone-storage-recover.timer >/dev/null 2>&1 \
+  || warn "音楽用ドライブの見回りタイマーを有効にできませんでした"
 systemctl restart kotone
 
 # --------------------------------------------------------------- 初期スキャン

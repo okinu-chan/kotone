@@ -1,0 +1,13 @@
+[Unit]
+Description=kotone — 音楽用ドライブの見回り
+
+# 再接続の瞬間は udev が知らせる（99-kotone-storage.rules）。こちらは保険で、
+# 知らせを取りこぼしたときや、デバイスはそのままでファイルシステムだけが
+# 止まったときに拾う。
+[Timer]
+OnBootSec=3min
+OnUnitInactiveSec=2min
+Unit=kotone-storage-recover@timer.service
+
+[Install]
+WantedBy=timers.target

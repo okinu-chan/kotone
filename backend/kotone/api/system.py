@@ -58,6 +58,15 @@ async def update_settings(ctx: Ctx, body: SettingsPatch) -> dict[str, Any]:
     return {"values": values, "specs": spec_dicts()}
 
 
+# ======================================================== 音楽用ドライブ
+
+
+@router.get("/storage")
+async def storage_state(ctx: Ctx) -> dict[str, Any]:
+    """音楽用ドライブの状態（その場で確かめ直して返す）。"""
+    return (await ctx.storage.check()).as_dict()
+
+
 # ============================================================== スキャン
 
 
