@@ -45,6 +45,10 @@ class FakeMPD:
     async def current_song(self) -> dict:
         return dict(self.song)
 
+    async def clear_error(self) -> None:
+        # calls には残さない（既存の試験は送ったコマンドの並びを厳密に見ている）
+        self.cleared = getattr(self, "cleared", 0) + 1
+
     async def song_at(self, position: int) -> dict | None:
         if position < 0 or position >= len(self.queue_items):
             return None
@@ -876,3 +880,221 @@ async def test_preset_is_silent_when_the_volume_already_matches(db, settings) ->
     await ctrl.next()
 
     assert mpd.calls == [("next", None)]
+
+
+# ------------------------- Bluetooth へ送る形式を、接続のサンプリングレートに合わせる
+#
+# bluez-alsa の ALSA プラグインは、求められたレートが接続中のものと違うと
+# コーデックを設定し直す。NW-ZX300 の受信はこれを受け付けず（AVDTP OPEN を
+# Bad State で拒否）、接続の表示は残ったまま音が出なくなる。ZX300 とは
+# LDAC 48 kHz で繋がり、44.1 kHz の曲を鳴らすたびに起きていた。
+
+
+class _PinningOutputs:
+    """出力先のフェイク。送る形式の固定を、起きた順に ``log`` へ残す。"""
+
+    def __init__(self, log: list, *, bluetooth: bool = True, fail: bool = False) -> None:
+        self.log = log
+        self._bluetooth = bluetooth
+        self._fail = fail
+
+    async def active(self) -> dict:
+        return {"id": 1 if self._bluetooth else 0,
+                "name": "Bluetooth" if self._bluetooth else "USB DAC",
+                "enabled": True, "bluetooth": self._bluetooth}
+
+    async def pin_format(self, output_id: int, audio_format: str) -> None:
+        if self._fail:
+            raise RuntimeError("outputset に失敗")
+        self.log.append(("pin", output_id, audio_format))
+
+
+class _Link:
+    """Bluetooth のフェイク（接続中のコーデック情報だけ返す）。"""
+
+    def __init__(self, info: dict | None) -> None:
+        self.info = info
+
+    async def codec_info(self, *, fresh: bool = False) -> dict | None:
+        return self.info
+
+
+LDAC_48K = {"codec": "LDAC", "available": ["SBC", "LDAC"], "samplerate": 48000, "channels": 2}
+
+
+def _bt_controller(db, settings, *, state="stop", info=LDAC_48K, **outputs_kwargs):
+    mpd = FakeMPD(state=state)
+    mpd.calls = log = []          # 固定と play の前後関係を 1 本の記録で見る
+    ctrl = PlaybackController(
+        mpd, db, FakeRepo({}), settings, EventBus(),
+        outputs=_PinningOutputs(log, **outputs_kwargs), bluetooth=_Link(info),
+    )
+    return ctrl, mpd, log
+
+
+async def test_bluetooth_is_pinned_to_the_link_rate_before_play(db, settings) -> None:
+    ctrl, mpd, log = _bt_controller(db, settings)
+
+    await ctrl._start_with_warmup(0)
+
+    kinds = [entry[0] for entry in log]
+    assert ("pin", 1, "48000:*:2") in log
+    assert kinds.index("pin") < kinds.index("play")    # 開く前に固定する
+
+
+@pytest.mark.parametrize(("state", "method"), [("stop", "play"), ("pause", "toggle"),
+                                                ("stop", "toggle")])
+async def test_resuming_also_pins(db, settings, state, method) -> None:
+    ctrl, mpd, log = _bt_controller(db, settings, state=state)
+
+    await getattr(ctrl, method)()
+
+    assert ("pin", 1, "48000:*:2") in log
+
+
+async def test_pausing_does_not_touch_the_output(db, settings) -> None:
+    ctrl, mpd, log = _bt_controller(db, settings, state="play")
+
+    await ctrl.toggle()
+
+    assert not any(entry[0] == "pin" for entry in log)
+
+
+async def test_usb_dac_is_never_pinned(db, settings) -> None:
+    """USB DAC はビットパーフェクトのまま（形式を固定しない）。"""
+    ctrl, mpd, log = _bt_controller(db, settings, bluetooth=False)
+    settings.set("startup_warmup_ms", 0)
+
+    await ctrl._start_with_warmup(0)
+
+    assert not any(entry[0] == "pin" for entry in log)
+
+
+async def test_no_link_means_no_pin_but_still_tries_to_play(db, settings) -> None:
+    ctrl, mpd, log = _bt_controller(db, settings, info=None)
+
+    await ctrl._start_with_warmup(0)
+
+    assert not any(entry[0] == "pin" for entry in log)
+    assert ("play", 0) in log
+
+
+async def test_a_failed_pin_does_not_block_playback(db, settings) -> None:
+    ctrl, mpd, log = _bt_controller(db, settings, fail=True)
+
+    await ctrl._start_with_warmup(0)
+
+    assert ("play", 0) in log
+
+
+async def test_follows_the_rate_of_each_connection(db, settings) -> None:
+    """SBC 44.1 kHz の機器なら 44.1 kHz に合わせる（機器ごとに違う）。"""
+    info = {"codec": "SBC", "available": ["SBC"], "samplerate": 44100, "channels": 2}
+    ctrl, mpd, log = _bt_controller(db, settings, info=info)
+
+    await ctrl._start_with_warmup(0)
+
+    assert ("pin", 1, "44100:*:2") in log
+
+
+async def test_previous_error_is_cleared_before_playing(db, settings) -> None:
+    ctrl, mpd, log = _bt_controller(db, settings)
+
+    await ctrl._start_with_warmup(0)
+
+    assert mpd.cleared == 1
+
+
+# ---------------------------------------------------------- MPD のエラーの文面
+
+
+def test_bluetooth_open_failure_is_explained() -> None:
+    error = ('Failed to open "Bluetooth" (alsa); Error opening ALSA device "bluealsa"; '
+             "snd_pcm_hw_params() failed: Connection timed out")
+    message = playback.describe_mpd_error(error)
+    assert "Bluetooth 機器へ音を送れませんでした" in message
+    assert "つなぎ直して" in message
+
+
+def test_other_output_failure_names_the_output() -> None:
+    error = 'Failed to open "USB DAC" (alsa); Error opening ALSA device "hw:1,0"; No such device'
+    assert playback.describe_mpd_error(error).startswith("「USB DAC」を開けませんでした")
+
+
+def test_no_error_means_nothing_to_show() -> None:
+    assert playback.describe_mpd_error(None) is None
+    assert playback.describe_mpd_error("") is None
+    assert "decode" in playback.describe_mpd_error("Failed to decode x.flac")
+
+
+# ------------------------------- 開けなかった理由を、シークで消してしまわない
+#
+# MPD はシークすると status の error を消す。再開後の位置合わせや
+# ウォームアップのシークが、出力を開けなかった理由を消していた（実機で確認）。
+
+OPEN_FAILED = ('Failed to open "Bluetooth" (alsa); '
+               'Failed to open ALSA device "bluealsa": No such device')
+
+
+class OpenFailingMPD(FakeMPD):
+    """出力を開けない MPD（鳴らそうとしても一時停止に戻り、error が残る）。"""
+
+    def __init__(self, state: str = "pause") -> None:
+        super().__init__(state=state)
+        self.error: str | None = None
+
+    async def status(self) -> dict:
+        base = await super().status()
+        if self.error:
+            base["error"] = self.error
+        return base
+
+    async def play(self, position: int | None = None) -> None:
+        self.calls.append(("play", position))
+        self.state, self.error = "pause", OPEN_FAILED
+
+    async def pause(self, paused: bool | None = None) -> None:
+        self.calls.append(("pause", paused))
+        if paused is False:
+            self.state, self.error = "pause", OPEN_FAILED
+        else:
+            self.state = "pause"
+
+    async def seek(self, seconds: float) -> None:
+        self.calls.append(("seek", seconds))
+        self.error = None                      # MPD の実際の振る舞い
+
+
+async def test_failed_resume_keeps_the_reason(db, settings) -> None:
+    mpd = OpenFailingMPD()
+    mpd.elapsed = 11.0
+    ctrl = PlaybackController(mpd, db, FakeRepo({}), settings, EventBus())
+    ctrl._paused_at, ctrl._paused_song_id = 10.0, mpd.song_id   # 1 秒ずれている
+
+    await ctrl.play()
+
+    assert ("seek", 10.0) not in mpd.calls
+    assert (await ctrl.build_state())["error"].startswith("Bluetooth 機器へ音を送れません")
+    assert ctrl._paused_at == 10.0          # 次にうまく再開できたときに合わせる
+
+
+async def test_successful_resume_still_corrects_the_drift(db, settings) -> None:
+    mpd = FakeMPD(state="pause")
+    mpd.elapsed = 11.0
+    ctrl = PlaybackController(mpd, db, FakeRepo({}), settings, EventBus())
+    ctrl._paused_at, ctrl._paused_song_id = 10.0, mpd.song_id
+
+    await ctrl.play()
+
+    assert ("seek", 10.0) in mpd.calls
+
+
+async def test_failed_warmup_keeps_the_reason(db, settings) -> None:
+    mpd = OpenFailingMPD(state="stop")
+    ctrl = PlaybackController(mpd, db, FakeRepo({}), settings, EventBus())
+    settings.set("startup_warmup_ms", 10)
+
+    await ctrl._start_with_warmup(0)
+
+    assert not any(call[0] == "seek" for call in mpd.calls)
+    assert (await ctrl.build_state())["error"] is not None

@@ -17,9 +17,14 @@ from collections.abc import Awaitable, Callable, Iterable
 from typing import Any
 
 from mpd.asyncio import MPDClient
-from mpd.base import CommandError
+from mpd.base import CommandError, MPDClientBase
 
 log = logging.getLogger(__name__)
+
+# python-mpd2 3.1 は outputset（MPD 0.21〜）を知らない。結果を返さない
+# コマンドとして足す（Bluetooth 出力の allowed_formats を実行中に変えるため）
+if not hasattr(MPDClient, "outputset"):
+    MPDClient.add_command("outputset", MPDClientBase._parse_nothing)
 
 EventCallback = Callable[[set[str]], Awaitable[None]]
 
@@ -167,6 +172,14 @@ class MPDConnection:
 
     async def stats(self) -> dict[str, Any]:
         return await self.command("stats")
+
+    async def clear_error(self) -> None:
+        """status の error を消す（前回の失敗が画面に残り続けないように）。"""
+        await self.command("clearerror")
+
+    async def set_output_attribute(self, output_id: int, name: str, value: str) -> None:
+        """出力の属性（allowed_formats など）を実行中に変える。"""
+        await self.command("outputset", output_id, name, value)
 
     # --- 再生操作 -------------------------------------------------------
     async def play(self, position: int | None = None) -> None:

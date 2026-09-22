@@ -16,6 +16,8 @@ class PlayerStore {
   #reconnectTimer = null;
   #tickTimer = null;
   #backoff = 1000;
+  /** 最後に知らせた再生エラー（同じものを何度も出さない） */
+  #shownError = null;
 
   track = $derived(this.state.track ?? null);
   playing = $derived(this.state.state === 'play');
@@ -57,7 +59,7 @@ class PlayerStore {
         return;
       }
       if (message.type === 'player') {
-        this.state = { ...this.state, ...message.payload };
+        this.apply(message.payload);
       } else if (message.type === 'scan') {
         scan.update(message.payload);
       } else if (message.type === 'settings') {
@@ -81,9 +83,25 @@ class PlayerStore {
     }, this.#backoff);
   }
 
-  /** サーバーから返った最新状態を反映する（REST 操作の後）。 */
+  /** サーバーから届いた最新状態を反映する（WebSocket・REST 操作の後）。 */
   apply(state) {
-    if (state) this.state = { ...this.state, ...state };
+    if (!state) return;
+    this.state = { ...this.state, ...state };
+    this.#notifyError(state);
+  }
+
+  /**
+   * 出力を開けなかったときなどの理由を知らせる。
+   *
+   * MPD は出力を開けないと黙って一時停止するだけで、画面からは「押しても
+   * 再生が始まらない」としか見えない。開けなかったことは少し遅れて届く
+   * （Bluetooth は応答を 25 秒ほど待ってから諦める）ので、状態の配信で拾う。
+   */
+  #notifyError(state) {
+    if (!('error' in state)) return;
+    const error = state.error || null;
+    if (error && error !== this.#shownError) toast.error(error);
+    this.#shownError = error;
   }
 
   async command(fn) {

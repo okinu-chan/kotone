@@ -18,12 +18,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import re
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from kotone.db import Database
 from kotone.events import EventBus
 from kotone.mpdclient import MPDConnection, MPDUnavailable
+from kotone.outputs import BLUETOOTH_OUTPUT_NAME
 from kotone.repository import LibraryRepository
 from kotone.settings import SettingsStore
 
@@ -398,12 +400,15 @@ class PlaybackController:
         state = status.get("state")
         if state == "play":
             await self.pause()
-        elif state == "pause":
+            return
+        await self._prepare_output()
+        if state == "pause":
             await self._resume()
         else:
             await self.mpd.play()
 
     async def play(self) -> None:
+        await self._prepare_output()
         status = await self.mpd.status()
         if status.get("state") == "pause":
             await self._resume()
@@ -428,6 +433,11 @@ class PlaybackController:
         if self._paused_at is None:
             return
         status = await self.mpd.status()
+        if _did_not_start(status):
+            # 出力を開けず、一時停止へ戻った。ここでシークすると MPD はエラーを
+            # 消してしまい、画面に理由が届かない（実機で確認）。止めた位置は
+            # 次にうまく再開できたときに合わせる
+            return
         if status.get("songid") != self._paused_song_id:
             self._paused_at = None
             return
@@ -682,6 +692,7 @@ class PlaybackController:
         "PCM drop"）を招いて、鳴り始めの数秒が途切れる。実機のログで、
         再生開始の 1〜2 秒後に必ず PCM drop が出ていることを確認した。
         """
+        await self._prepare_output()
         # 出力バッファは play の直後に一気に埋まる。埋まる前に音量を入れる
         await self._preset_loudness(position)
 
@@ -701,7 +712,10 @@ class PlaybackController:
             self._expected_volume = 0
             await self.mpd.play(position)
             await asyncio.sleep(warmup_ms / 1000)
-            await self.mpd.seek(0)                # デバイスが開いた状態で曲頭へ戻す
+            # デバイスが開いた状態で曲頭へ戻す。開けなかったときは戻さない
+            # （シークすると MPD がエラーを消し、画面に理由が届かなくなる）
+            if not _did_not_start(await self.mpd.status()):
+                await self.mpd.seek(0)
         finally:
             # 音量は「元の値」ではなく、いま鳴っている曲に対する実効音量を
             # 計算し直して設定する。ウォームアップ中の sleep で idle イベントが
@@ -933,10 +947,55 @@ class PlaybackController:
             "bitrate": _int_or_none(status.get("bitrate")),
             "track": track,
             "raw_file": song.get("file"),
+            # 出力を開けなかったときなど。MPD は黙って一時停止するだけなので、
+            # 理由を画面に出すために返す
+            "error": describe_mpd_error(status.get("error")),
             **await self._output_state(),
         }
         self._cached_state = state
         return state
+
+    async def _prepare_output(self) -> None:
+        """鳴らし始める前に出力を整える。
+
+        * 前回の失敗（status の error）を消す。残っていると、今回うまく
+          鳴っても画面に古いエラーが出続ける。
+        * Bluetooth なら、送る形式をいまの接続のサンプリングレートに固定する。
+        """
+        await self.mpd.clear_error()
+        await self._match_bluetooth_stream()
+
+    async def _match_bluetooth_stream(self) -> None:
+        """Bluetooth へ送る形式を、いまの接続のサンプリングレートに合わせる。
+
+        bluez-alsa の ALSA プラグインは、再生側が求めるサンプリングレートが
+        接続中のものと違うと、コーデックを設定し直す（A2DP の再構成）。
+        NW-ZX300 の Bluetooth 受信はこの再構成を受け付けず（AVDTP の OPEN を
+        Bad State で拒否する）、両方の画面に「LDAC で接続中」と出たまま、
+        音を送れなくなる。ZX300 とは LDAC 48 kHz で繋がるので、44.1 kHz の
+        曲を鳴らすたびにこれが起きていた（2026-09-23、実機で再現）。
+
+        接続を曲に合わせるのをやめ、MPD の出力を接続に合わせる（変換は MPD
+        が行う）。接続のレートは機器ごと・接続ごとに違いうるので、鳴らし
+        始めるたびに読み直す。
+        """
+        if self.outputs is None or self.bluetooth is None:
+            return
+        try:
+            active = await self.outputs.active()
+            if not active or not active.get("bluetooth"):
+                return
+            info = await self.bluetooth.codec_info(fresh=True)
+            rate = (info or {}).get("samplerate")
+            if not rate:
+                return   # 繋がっていない。開けなかったことは MPD の error で知らせる
+            channels = (info or {}).get("channels") or 2
+            await self.outputs.pin_format(int(active["id"]), f"{rate}:*:{channels}")
+        except MPDUnavailable:
+            raise
+        except Exception:
+            # 合わせられなくても再生は試す（接続とレートが一致していれば鳴る）
+            log.warning("Bluetooth へ送る形式を合わせられませんでした", exc_info=True)
 
     async def _bluetooth_output(self) -> bool:
         """いま音を出している先が Bluetooth か。"""
@@ -975,6 +1034,31 @@ class PlaybackController:
     async def broadcast_state(self) -> None:
         state = await self.build_state()
         self.events.publish("player", state)
+
+
+_OPEN_FAILED = re.compile(r'Failed to open "([^"]+)"')
+
+
+def _did_not_start(status: dict[str, Any]) -> bool:
+    """鳴らし始めようとして、始まらなかったか（出力を開けなかったなど）。"""
+    return bool(status.get("error")) or status.get("state") != "play"
+
+
+def describe_mpd_error(error: str | None) -> str | None:
+    """MPD の status の error を、画面に出せる文にする。
+
+    MPD は出力を開けないと、エラーを status に残して一時停止するだけで、
+    画面からは「押しても再生が始まらない」としか見えない。
+    """
+    if not error:
+        return None
+    opened = _OPEN_FAILED.search(error)
+    if opened and opened.group(1) == BLUETOOTH_OUTPUT_NAME:
+        return ("Bluetooth 機器へ音を送れませんでした。"
+                "機器との接続を切って、つなぎ直してください。")
+    if opened:
+        return f"「{opened.group(1)}」を開けませんでした。機器の電源と接続を確認してください。"
+    return f"再生できませんでした（{error}）"
 
 
 def _int_or_none(value: Any) -> int | None:

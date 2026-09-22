@@ -58,3 +58,10 @@ class OutputController:
             if item["enabled"]:
                 return item
         return None
+
+    async def pin_format(self, output_id: int, audio_format: str) -> None:
+        """出力へ送る形式を固定する（例 ``48000:*:2``。MPD が変換して合わせる）。
+
+        MPD の ``allowed_formats`` を使う。開き直したときから効く。
+        """
+        await self.mpd.set_output_attribute(output_id, "allowed_formats", audio_format)
