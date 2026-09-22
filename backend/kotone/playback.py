@@ -747,6 +747,15 @@ class PlaybackController:
         )
         await self.broadcast_state()
 
+    async def refresh_volume(self) -> None:
+        """音量に関わる設定の変更を、いま鳴っている音量へすぐ反映する。
+
+        音量の操作方法（スライダーの有効・無効）やラウドネス補正を変えても、
+        これまでは次の曲へ移るまで MPD の音量が変わらなかった。スライダーで
+        下げたまま無効にすると、下げた音量のまま残っていた。
+        """
+        await self._apply_loudness(await self.mpd.status(), fade=USER_VOLUME_FADE_SECONDS)
+
     async def _reconcile_external_volume(self) -> None:
         """他クライアント等が音量を変えた場合に、その値を新しいユーザー基準にする。
 

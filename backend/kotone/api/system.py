@@ -20,6 +20,14 @@ from kotone.stats import estimate_loudness
 
 router = APIRouter(tags=["system"])
 
+#: 変えたら、いま鳴っている音量を計算し直す設定。
+#: volume_control（音量スライダーの有効・無効）を含める。無効にしたら
+#: その場で最大（×ラウドネス補正）へ戻す
+VOLUME_SETTINGS = {
+    "volume_control",
+    "loudness_enabled", "loudness_mode", "loudness_preamp_db", "loudness_clip_prevention",
+}
+
 
 class SettingsPatch(BaseModel):
     values: dict[str, Any]
@@ -47,11 +55,8 @@ async def update_settings(ctx: Ctx, body: SettingsPatch) -> dict[str, Any]:
 
     # 再生に影響する設定は即座に MPD へ反映する
     if ctx.mpd.connected:
-        if {
-            "loudness_enabled", "loudness_mode", "loudness_preamp_db",
-            "loudness_clip_prevention",
-        } & set(body.values):
-            await ctx.player._apply_loudness(await ctx.mpd.status())  # noqa: SLF001
+        if VOLUME_SETTINGS & set(body.values):
+            await ctx.player.refresh_volume()
         await ctx.player.broadcast_state()
 
     ctx.events.publish("settings", {"values": values})

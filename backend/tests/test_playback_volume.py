@@ -1098,3 +1098,67 @@ async def test_failed_warmup_keeps_the_reason(db, settings) -> None:
 
     assert not any(call[0] == "seek" for call in mpd.calls)
     assert (await ctrl.build_state())["error"] is not None
+
+
+# -------------------------------- 音量スライダーの有効・無効を、その場で反映する
+#
+# スライダーで下げたまま無効にすると、次の曲へ移るまで下げた音量のまま
+# 残っていた。無効にしたら、その場で最大（×ラウドネス補正）へ戻す。
+
+
+async def _settle(ctrl: PlaybackController) -> None:
+    """音量のフェードが終わるまで待つ。"""
+    if ctrl._fade_task is not None:
+        await ctrl._fade_task
+
+
+async def test_disabling_the_slider_restores_full_volume_at_once(controller) -> None:
+    ctrl, mpd = controller
+    ctrl.repo.tracks["a.flac"].update(track_gain_db=-6.0, track_peak=1.0)
+    ctrl.settings.set("volume_control", "kotone")
+    await ctrl.set_volume(30)
+    await _settle(ctrl)
+    assert mpd.volume == 15               # 30 × 10^(-6/20)
+
+    ctrl.settings.set("volume_control", "external")
+    await ctrl.refresh_volume()
+    await _settle(ctrl)
+
+    assert mpd.volume == 50               # 100 × 10^(-6/20)。スライダー位置は関係ない
+    assert ctrl.user_volume == 30         # スライダーの値は覚えておく（再び有効にしたとき用）
+
+
+async def test_enabling_the_slider_goes_back_to_its_position(controller) -> None:
+    ctrl, mpd = controller
+    ctrl.repo.tracks["a.flac"].update(track_gain_db=-6.0, track_peak=1.0)
+    ctrl.user_volume = 30
+    ctrl.settings.set("volume_control", "external")
+    await ctrl.refresh_volume()
+    await _settle(ctrl)
+    assert mpd.volume == 50
+
+    ctrl.settings.set("volume_control", "kotone")
+    await ctrl.refresh_volume()
+    await _settle(ctrl)
+
+    assert mpd.volume == 15
+
+
+async def test_disabled_slider_is_full_scale_without_loudness(controller) -> None:
+    ctrl, mpd = controller
+    ctrl.settings.set("loudness_enabled", False)
+    ctrl.settings.set("volume_control", "kotone")
+    await ctrl.set_volume(20)
+    await _settle(ctrl)
+
+    ctrl.settings.set("volume_control", "external")
+    await ctrl.refresh_volume()
+    await _settle(ctrl)
+
+    assert mpd.volume == 100
+
+
+def test_volume_control_is_a_volume_setting() -> None:
+    from kotone.api.system import VOLUME_SETTINGS
+
+    assert "volume_control" in VOLUME_SETTINGS
