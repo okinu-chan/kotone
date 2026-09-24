@@ -14,6 +14,17 @@ kotone の変更を新しい順に記録します。バージョン番号（`bac
 
 ---
 
+## 2026-09-26
+
+### 修正
+- `kotone-update` が git の所有者確認（dubious ownership）で止まる問題。
+  `/opt/kotone` は `kotone` ユーザーの持ち物で、スクリプトは root で動くため、
+  git 2.35.2 以降では pull できなかった。このリポジトリに限って `safe.directory` を指定する
+- `kotone-update` が `pip install` を所有者の付け直しより後に行っており、
+  Python 環境に root の持ち物のファイルが残っていた
+- `kotone-update` が自分自身と `kotone-cli` を入れ直さず、更新が `/usr/local/bin` に届かなかった
+- pip の中間生成物 `build/` を `.gitignore` に追加
+
 ## 2026-09-25
 
 ### 追加

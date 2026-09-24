@@ -712,12 +712,15 @@ USB DAC を指定する場合は `/etc/mpd.conf` の `device` を書き、MPD �
 1. DB をバックアップする
 2. ローカルの変更を `git stash` する
 3. `git pull --ff-only`
-4. `pip install` し直す
-5. ドライブ自動復旧のファイルを入れ直す
-6. マイグレーションを適用する
-7. タイマーを有効化し、`kotone` を再起動する
+4. `pip install` し直し、`/opt/kotone` をサービス用ユーザーの持ち物に戻す
+5. `kotone-update` 自身と `kotone-cli` を `/usr/local/bin` に入れ直す
+6. ドライブ自動復旧のファイルを入れ直す
+7. マイグレーションを適用する
+8. タイマーを有効化し、`kotone` を再起動する
 
-自動では更新しません。
+自動では更新しません。`/opt/kotone` は `kotone` ユーザーの持ち物で、このスクリプトは
+root で動きます。git がこれを拒まないよう、このリポジトリに限って `safe.directory`
+を指定して操作します。
 
 ### 6.4 アンインストール
 

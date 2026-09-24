@@ -24,6 +24,11 @@ die()  { printf '%sエラー:%s %s\n' "${RED}${BOLD}" "${RESET}" "$*" >&2; exit 
 [[ $EUID -eq 0 ]] || die "root で実行してください（sudo kotone-update）"
 [[ -d "${PREFIX}/.git" ]] || die "${PREFIX} が git リポジトリではありません。install.sh を実行してください。"
 
+# アプリの中身はサービス用ユーザーの持ち物で、このスクリプトは root で動く。
+# git 2.35.2 以降は、他のユーザーが持つリポジトリの操作を拒む
+# （detected dubious ownership）。このリポジトリだけを信頼して操作する。
+repo_git() { git -c safe.directory="$PREFIX" -C "$PREFIX" "$@"; }
+
 # ---------------------------------------------------------- バックアップ
 
 info "DB をバックアップします"
@@ -33,31 +38,41 @@ fi
 
 # ---------------------------------------------------------------- 取得
 
-CURRENT="$(git -C "$PREFIX" rev-parse --short HEAD)"
+CURRENT="$(repo_git rev-parse --short HEAD)"
 info "更新を取得します（現在: ${CURRENT}）"
 
-if ! git -C "$PREFIX" diff --quiet HEAD 2>/dev/null; then
+if ! repo_git diff --quiet HEAD; then
   warn "ローカルに変更があります。git stash してから続行します。"
-  git -C "$PREFIX" stash push -u -m "kotone-update $(date -Iseconds)" || true
+  repo_git stash push -u -m "kotone-update $(date -Iseconds)" || true
 fi
 
-git -C "$PREFIX" pull --ff-only
+repo_git pull --ff-only
 
-UPDATED="$(git -C "$PREFIX" rev-parse --short HEAD)"
+UPDATED="$(repo_git rev-parse --short HEAD)"
 if [[ "$CURRENT" == "$UPDATED" ]]; then
   info "すでに最新です（${CURRENT}）。依存関係とマイグレーションだけ確認します。"
 else
   info "${CURRENT} → ${UPDATED} に更新しました"
-  git -C "$PREFIX" --no-pager log --oneline "${CURRENT}..${UPDATED}" | head -20
+  repo_git --no-pager log --oneline "${CURRENT}..${UPDATED}" | head -20
 fi
-
-chown -R "${SERVICE_USER}:${SERVICE_USER}" "$PREFIX"
 
 # ------------------------------------------------------------ 依存関係
 
 info "Python の依存関係を更新します"
 "${VENV}/bin/pip" install --quiet --upgrade pip wheel
 "${VENV}/bin/pip" install --quiet --upgrade "${PREFIX}/backend"
+
+# root で pull・pip したぶんも含めて、サービス用ユーザーの持ち物に戻す
+chown -R "${SERVICE_USER}:${SERVICE_USER}" "$PREFIX"
+
+# ------------------------------------------------------------ コマンド
+
+# 更新でこのスクリプト自身が変わっても /usr/local/bin には届かないので、
+# 毎回入れ直す。install は新しいファイルに置き換えるため、実行中の
+# このスクリプトには影響しない（次回の実行から新しいものが使われる）
+info "コマンドを更新します"
+install -m 755 "${PREFIX}/scripts/kotone-update" /usr/local/bin/kotone-update
+install -m 755 "${PREFIX}/scripts/kotone-cli-wrapper" /usr/local/bin/kotone-cli
 
 # ------------------------------------------ 音楽用ドライブの自動復旧
 
