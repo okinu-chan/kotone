@@ -37,7 +37,7 @@ def create_app(config: Config | None = None) -> FastAPI:
         ctx = AppContext(config)
         app.state.ctx = ctx
         await ctx.startup()
-        log.info("kotone %s を起動しました (http://%s:%s)", __version__, config.host, config.port)
+        log.info("KOTONE %s を起動しました (http://%s:%s)", __version__, config.host, config.port)
         try:
             yield
         finally:

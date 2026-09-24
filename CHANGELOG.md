@@ -1,6 +1,6 @@
 # 変更履歴
 
-kotone の変更を新しい順に記録します。バージョン番号（`backend/pyproject.toml` の
+KOTONE の変更を新しい順に記録します。バージョン番号（`backend/pyproject.toml` の
 0.1.0）はまだ上げておらず、リリースもしていないため、日付で区切っています。
 各項目の末尾はコミット ID です。
 
@@ -19,6 +19,16 @@ kotone の変更を新しい順に記録します。バージョン番号（`bac
 ### 追加
 - 仕様書 `SPEC.md` と、この変更履歴 `CHANGELOG.md`
 - GitHub での公開（https://github.com/okinu-chan/kotone）
+
+### 変更
+- 名称を **KOTONE** に確定した。文章と画面の表記はすべて大文字の「KOTONE」にした
+  （ブラウザのタブ名、設定画面のバージョン表示と「音量の操作方法」の選択肢、
+  `kotone-cli --version`、起動時のログ、systemd ユニットの説明、各文書）。パッケージ名・コマンド名・パス・
+  サービス用ユーザー名・設定値・URL などの識別子は小文字の `kotone` のまま
+- 要件定義書 8 章の「プロジェクト名」を確定済みにした
+
+### 削除
+- 名前を一括で変えるためのスクリプト `scripts/rename-project.sh`（名称の確定で不要になった）
 
 ### 修正
 - `kotone-update` が git の所有者確認（dubious ownership）で止まる問題。

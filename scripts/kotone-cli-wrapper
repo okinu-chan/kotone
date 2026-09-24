@@ -7,7 +7,7 @@ PREFIX="${KOTONE_PREFIX:-/opt/kotone}"
 VENV="${PREFIX}/backend/.venv"
 
 if [[ ! -x "${VENV}/bin/kotone-cli" ]]; then
-  echo "kotone がインストールされていません: ${VENV}" >&2
+  echo "KOTONE がインストールされていません: ${VENV}" >&2
   exit 1
 fi
 

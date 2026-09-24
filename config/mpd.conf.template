@@ -1,4 +1,4 @@
-# kotone が生成する MPD 設定。
+# KOTONE が生成する MPD 設定。
 # install.sh が @MUSIC_DIR@ / @DATA_DIR@ を実際のパスへ置換します。
 #
 # 既存の設定は /etc/mpd.conf.kotone-backup に退避されています。
@@ -15,13 +15,13 @@ bind_to_address     "localhost"
 port                "6600"
 
 # 家庭内 LAN 限定運用のため、MPD 自体は localhost にのみ bind する。
-# 外部からの操作は kotone のバックエンド経由になる（要件 4.3）。
+# 外部からの操作は KOTONE のバックエンド経由になる（要件 4.3）。
 
 log_file            "syslog"
 log_level           "notice"
 
 auto_update         "no"
-# ライブラリの更新は kotone 側のスキャンから明示的に指示する。
+# ライブラリの更新は KOTONE 側のスキャンから明示的に指示する。
 # 常時監視は SSD/USB メディアのスピンアップやログの肥大を招くため無効にする。
 
 # ---------------------------------------------------------------- 再生品質
@@ -29,7 +29,7 @@ auto_update         "no"
 # ギャップレス再生のための設定（要件 3.1）
 gapless_mp3_playback "yes"
 
-# ReplayGain は使わない。ラウドネス補正は kotone のバックエンドが
+# ReplayGain は使わない。ラウドネス補正は KOTONE のバックエンドが
 # SQLite に保持した計測値をもとに setvol で動的に適用する（要件 3.1）。
 replaygain          "off"
 

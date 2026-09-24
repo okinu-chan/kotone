@@ -554,7 +554,7 @@ class PlaybackController:
     async def _disable_crossfade(self) -> None:
         """MPD 側のクロスフェードを必ず切る。
 
-        kotone はクロスフェードを提供しない（:mod:`kotone.settings` の
+        KOTONE はクロスフェードを提供しない（:mod:`kotone.settings` の
         冒頭に理由を書いてある）。MPD は state_file に crossfade を残すので、
         以前の設定や他のクライアントの操作が生き残らないようにする。
         """

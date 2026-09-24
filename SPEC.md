@@ -1,6 +1,6 @@
-# kotone 仕様書（SPEC）
+# KOTONE 仕様書（SPEC）
 
-この文書は、kotone をまったく知らない人（別の AI アシスタントを含む）が、
+この文書は、KOTONE をまったく知らない人（別の AI アシスタントを含む）が、
 **いまのコードが何をしているか**を把握できるようにまとめたものです。
 
 - **書いてあるのは、リポジトリ内のコード・設定ファイルで確認できたことだけです。**
@@ -34,12 +34,13 @@ Raspberry Pi 上で動く、日本語ネイティブの音楽プレイヤーで�
 タブレットのブラウザから操作します。目標は Sony NW-ZX300 のような軽快な操作感です
 （`README.md`、`docs/requirements.md` 1.2）。
 
-- 再生エンジンは MPD（Music Player Daemon）です。kotone は MPD を制御する
+- 再生エンジンは MPD（Music Player Daemon）です。KOTONE は MPD を制御する
   バックエンドと、ブラウザで動く画面（SPA）で構成されます。
 - 日本語の曲名・アーティスト名を、読み仮名にもとづく五十音順で並べます。
 - 家庭内 LAN での利用が前提で、**認証の仕組みはありません**（`main.py` に認証の
   処理は無く、`docs/install.md` にも外部公開しないよう書かれています）。
-- `kotone` は暫定の名前です。`scripts/rename-project.sh` で一括変更できます
+- 名称は **KOTONE** です（2026-09-25 に確定）。パッケージ名・コマンド名・パス・
+  サービス用ユーザー名・URL などの識別子には、小文字の `kotone` を使います
   （`kotone/__init__.py`）。
 
 ## 2. 想定ハードウェア・OS
@@ -92,7 +93,7 @@ MPD                                          └─ rsgain / ffmpeg（ラウド�
 |---|---|---|
 | `kotone.service` | バックエンド本体。ユーザー `kotone` で動く | `systemd/kotone.service` |
 | `mpd.service` | 再生エンジン | Debian のパッケージ |
-| `bluealsa.service` | Bluetooth の音声を ALSA に見せる。kotone 用の起動オプションを上書きする | `install.sh` が drop-in を書く |
+| `bluealsa.service` | Bluetooth の音声を ALSA に見せる。KOTONE 用の起動オプションを上書きする | `install.sh` が drop-in を書く |
 | `kotone-storage-recover.timer` | 音楽用ドライブの見回り（2 分おき）。root で動く | `systemd/kotone-storage-recover.timer` |
 | `kotone-storage-recover@.service` | 音楽用ドライブの自動復旧（udev とタイマーから起動） | `systemd/kotone-storage-recover@.service` |
 
@@ -163,8 +164,7 @@ MPD                                          └─ rsgain / ffmpeg（ラウド�
 ├── scripts/
 │   ├── kotone-update        更新コマンド（/usr/local/bin に入る）
 │   ├── kotone-cli-wrapper   kotone-cli のラッパー（/usr/local/bin/kotone-cli）
-│   ├── kotone-storage-recover   ドライブの自動復旧（/usr/local/sbin に入る）
-│   └── rename-project.sh    プロジェクト名の一括変更
+│   └── kotone-storage-recover   ドライブの自動復旧（/usr/local/sbin に入る）
 ├── docs/                    要件定義書・設計メモ・インストール手順・アートワーク推奨仕様
 ├── install.sh / uninstall.sh
 ├── SPEC.md / CHANGELOG.md / README.md / LICENSE（MIT）
@@ -182,9 +182,9 @@ MPD                                          └─ rsgain / ffmpeg（ラウド�
 | `/var/lib/kotone/mpd/` | MPD のデータベース・状態 | 保持 |
 | `/etc/kotone/kotone.env` | デプロイ設定（3.6 節） | 保持 |
 | `/etc/mpd.conf` | MPD の設定（元の設定は `/etc/mpd.conf.kotone-backup`） | 保持 |
-| `/run/kotone-storage/status.json` | 自動復旧の状態（root が書き、kotone が読む） | 再起動で消える |
+| `/run/kotone-storage/status.json` | 自動復旧の状態（root が書き、KOTONE が読む） | 再起動で消える |
 
-**注意:** pip は kotone を仮想環境の `site-packages` に**コピー**します。
+**注意:** pip は `kotone` パッケージを仮想環境の `site-packages` に**コピー**します。
 `/opt/kotone/backend/kotone/` を書き換えただけでは動作は変わりません
 （`kotone-update` は `pip install` し直すので問題ありません）。
 
@@ -258,8 +258,8 @@ WebSocket の ping 間隔 20 秒・待ち 30 秒、keep-alive 75 秒、終了待
 
 ### 3.7 MPD の設定（`config/mpd.conf.template`）
 
-- `replaygain "off"`、`mixer_type "software"`（ラウドネス補正は kotone が音量で当てるため）
-- `auto_update "no"`（ライブラリの更新は kotone のスキャンから指示する）
+- `replaygain "off"`、`mixer_type "software"`（ラウドネス補正は KOTONE が音量で当てるため）
+- `auto_update "no"`（ライブラリの更新は KOTONE のスキャンから指示する）
 - `audio_buffer_size "4096"`、`gapless_mp3_playback "yes"`、`bind_to_address "localhost"`
 - 出力「USB DAC」: ALSA。`auto_resample` / `auto_format` / `auto_channels` を `no`
   （ビットパーフェクト）、`dop "no"`、`device` は指定なし（ALSA の default）
@@ -434,7 +434,7 @@ MPD のキューの中身を表示し、タップした曲を単独で再生し�
 ジャンル・年・プレイリスト。検索などからの任意の曲リストは「選択した曲」）の
 全曲を MPD のキューに読み込みます。
 
-| 設定 | MPD の repeat | single | random | kotone の介入 |
+| 設定 | MPD の repeat | single | random | KOTONE の介入 |
 |---|---|---|---|---|
 | リピートなし | 0 | 0 | ― | 下の「範囲の終端」 |
 | 範囲内リピート | 1 | 0 | ― | なし |
@@ -766,7 +766,6 @@ npm run build
 | DSD の DoP の切り替え | `mpd.conf` の `dop` を手で書き換える必要がある。画面の設定は無い（`docs/design-notes.md` 7 章で「要検討」） |
 | タグ編集の音源ファイルへの書き戻し | 行わない方針（`editing.py`）。DB にだけ保存する |
 | 認証 | 無い。家庭内 LAN 専用 |
-| プロジェクトの正式名称 | 未決定（`docs/requirements.md` 8 章） |
 
 ### 7.3 実装しないと決めているもの（`docs/requirements.md` 6 章）
 

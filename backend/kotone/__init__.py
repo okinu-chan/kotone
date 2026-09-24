@@ -1,7 +1,7 @@
-"""kotone — Raspberry Pi 向け日本語ネイティブ音楽プレイヤー。
+"""KOTONE — Raspberry Pi 向け日本語ネイティブ音楽プレイヤー。
 
-パッケージ名 ``kotone`` は暫定の識別子。正式名称決定後は
-``scripts/rename-project.sh`` で一括変更する（要件定義書 8 章）。
+名称の表記は KOTONE。パッケージ名・コマンド名・パスなどの識別子には
+小文字の ``kotone`` を使う。
 """
 
 __version__ = "0.1.0"

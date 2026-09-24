@@ -68,7 +68,7 @@
     small: '小',
     normal: '標準',
     large: '大',
-    kotone: 'kotone（画面のスライダー）',
+    kotone: 'KOTONE（画面のスライダー）',
     external: '外部（アンプ側で調整）',
   };
 
@@ -350,7 +350,7 @@
       <h2>システム</h2>
       <dl>
         <dt>バージョン</dt>
-        <dd>kotone {system.version}（スキーマ v{system.schema_version}）</dd>
+        <dd>KOTONE {system.version}（スキーマ v{system.schema_version}）</dd>
         <dt>MPD</dt>
         <dd class:offline={!system.mpd.connected}>
           {system.mpd.connected ? `接続中（${system.mpd.host}）` : '未接続'}

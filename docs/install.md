@@ -30,7 +30,7 @@ sudo ./install.sh --music-dir /mnt/music
 2. サービス用ユーザー `kotone` の作成
 3. `/opt/kotone` へアプリを配置し、`/opt/kotone/backend/.venv` に Python 環境を構築
 4. `/etc/kotone/kotone.env` に設定ファイルを作成
-5. `/etc/mpd.conf` を kotone 用に設定（既存設定は `.kotone-backup` に退避）
+5. `/etc/mpd.conf` を KOTONE 用に設定（既存設定は `.kotone-backup` に退避）
 6. systemd サービス `kotone.service` を登録して起動
 
 ### 主なオプション

@@ -32,7 +32,7 @@ from kotone.text import get_reading_generator, make_sort_fields
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="kotone-cli", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--version", action="version", version=f"kotone {__version__}")
+    parser.add_argument("--version", action="version", version=f"KOTONE {__version__}")
     parser.add_argument("--log-level", default=None)
     sub = parser.add_subparsers(dest="command", required=True)
 

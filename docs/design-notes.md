@@ -19,7 +19,7 @@ PlayScope = { kind: "album" | "playlist" | "artist" | "genre" | "year" | "all",
 再生開始時、スコープに属する全曲を解決して MPD キューへ読み込む。
 各モードは以下のように MPD フラグへマップされる。
 
-| kotone のモード | MPD `repeat` | MPD `single` | MPD `random` | バックエンドの介入 |
+| KOTONE のモード | MPD `repeat` | MPD `single` | MPD `random` | バックエンドの介入 |
 |---|---|---|---|---|
 | リピート: オフ | 0 | 0 | - | なし |
 | リピート: 1曲 | 1 | 1 | - | なし |
@@ -217,4 +217,4 @@ MPD の `random` はキューを走査しきるまで重複しないため、Wal
 - **区切り文字の確定** — 実ライブラリのタグを `analyze-artists` で確認して確定させる。
 - **DSD 再生の検証** — MPD の DSD over PCM (DoP) / native DSD は DAC 依存。
   `mpd.conf` の `dop` 設定を UI から切り替えられるようにするか要検討。
-- **プロジェクト名** — 要件定義書 8 章。`scripts/rename-project.sh` で一括変更可能。
+- ~~**プロジェクト名**~~ — KOTONE で確定（2026-09-25。要件定義書 8 章）。

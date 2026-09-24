@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# kotone のアンインストール。
+# KOTONE のアンインストール。
 #
 #   sudo ./uninstall.sh [--purge]
 #

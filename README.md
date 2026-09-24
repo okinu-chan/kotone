@@ -1,4 +1,4 @@
-# kotone
+# KOTONE
 
 Raspberry Pi 向けの、日本語ネイティブな音楽プレイヤープラットフォーム。
 
@@ -6,9 +6,8 @@ Sony NW-ZX300 のような軽快な操作感を、Raspberry Pi + USB DAC の環�
 実現することを目指しています。moOde 等の既存ディストリビューションには依存せず、
 公式 Raspberry Pi OS (Lite) の上に単体で構築されます。
 
-> **プロジェクト名について**: `kotone` は暫定の識別子です（要件定義書 8 章参照）。
-> 正式名称の決定後は [`scripts/rename-project.sh`](scripts/rename-project.sh) で
-> 一括リネームできます。
+> **名称について**: 名称は **KOTONE** です。コマンド名・フォルダ名・パッケージ名などの
+> 識別子には、小文字の `kotone` を使います。
 
 ## 特徴
 

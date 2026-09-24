@@ -1,4 +1,4 @@
-# kotone フロントエンド
+# KOTONE フロントエンド
 
 Svelte 5 + Vite の SPA。ビルド成果物（`dist/`）は**リポジトリに含めます**。
 Raspberry Pi 上に Node.js を入れずに済ませるためです（要件定義書 4.7 / 5 章）。

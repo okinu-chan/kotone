@@ -1,4 +1,4 @@
-# kotone バックエンド
+# KOTONE バックエンド
 
 Python / FastAPI 製。MPD の制御、タグ DB（SQLite）、アートワークキャッシュ、
 ラウドネス補正を担当します。

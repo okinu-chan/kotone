@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "kotone の Web UI（Svelte + Vite）。ビルド済み静的ファイルを dist/ に出力し、リポジトリへ同梱する。",
+  "description": "KOTONE の Web UI（Svelte + Vite）。ビルド済み静的ファイルを dist/ に出力し、リポジトリへ同梱する。",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

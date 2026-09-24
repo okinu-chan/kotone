@@ -262,7 +262,7 @@ class MPDConnection:
     async def set_crossfade(self, seconds: int) -> None:
         """クロスフェードの秒数（0 で無効）。
 
-        kotone はこの機能を提供しないため 0 を入れる用途にしか使わない
+        KOTONE はこの機能を提供しないため 0 を入れる用途にしか使わない
         （理由は :mod:`kotone.settings` の冒頭）。MPD は state_file に値を
         残すので、以前の設定が生き残らないよう接続のたびに切っている。
         """

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# kotone セットアップスクリプト（要件 5 章）
+# KOTONE セットアップスクリプト（要件 5 章）
 #
 # 前提: 公式 Raspberry Pi OS (Lite, Bookworm 以降) が書き込み・起動済みであること。
 #
@@ -122,7 +122,7 @@ fi
 systemctl disable --now bluealsa-aplay >/dev/null 2>&1 || true
 mkdir -p /etc/systemd/system/bluealsa.service.d
 cat > /etc/systemd/system/bluealsa.service.d/kotone.conf <<'BTEOF'
-# kotone は Pi から BT 機器へ送る用途だけを使う。
+# KOTONE は Pi から BT 機器へ送る用途だけを使う。
 # コーデックは既定だと SBC のみ。LDAC / aptX が使えるビルドなら有効にする
 # （機器が対応していれば自動でそちらが選ばれる）。
 [Service]
@@ -218,7 +218,7 @@ chown -R "${SERVICE_USER}:${SERVICE_USER}" "$PREFIX"
 if [[ ! -f "${CONFIG_DIR}/kotone.env" ]]; then
   info "設定ファイルを作成します: ${CONFIG_DIR}/kotone.env"
   cat > "${CONFIG_DIR}/kotone.env" <<EOF
-# kotone の環境設定。変更後は systemctl restart kotone で反映されます。
+# KOTONE の環境設定。変更後は systemctl restart kotone で反映されます。
 KOTONE_HOST=0.0.0.0
 KOTONE_PORT=${PORT}
 KOTONE_MUSIC_DIR=${MUSIC_DIR}
@@ -288,7 +288,7 @@ systemctl restart kotone
 
 sleep 2
 if systemctl is-active --quiet kotone; then
-  info "kotone サービスが起動しました"
+  info "KOTONE のサービスが起動しました"
 else
   warn "サービスが起動していません。journalctl -u kotone -n 50 を確認してください。"
 fi
@@ -298,7 +298,7 @@ HOSTNAME_LOCAL="$(hostname).local"
 
 cat <<EOF
 
-${GREEN}${BOLD}kotone のセットアップが完了しました。${RESET}
+${GREEN}${BOLD}KOTONE のセットアップが完了しました。${RESET}
 
   Web UI       http://${HOSTNAME_LOCAL}:${PORT}/
                http://${IP_ADDR:-<PiのIP>}:${PORT}/
