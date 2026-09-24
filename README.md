@@ -73,6 +73,8 @@ sudo kotone-update
 
 ## 開発
 
+- **仕様書（いまのコードが何をしているか）: [SPEC.md](SPEC.md)**
+- 変更履歴: [CHANGELOG.md](CHANGELOG.md)
 - バックエンド: [backend/README.md](backend/README.md)
 - フロントエンド: [frontend/README.md](frontend/README.md)
 - 要件定義書: [docs/requirements.md](docs/requirements.md)

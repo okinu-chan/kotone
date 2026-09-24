@@ -15,8 +15,11 @@ MPD の設定は書き換えなくてよい。出力の切り替えは MPD の�
 音質について
 ------------
 A2DP は必ず再圧縮が入る（可逆ではない）。使えるコーデックは bluealsa の
-ビルドと相手機器の対応で決まり、この環境では LDAC / aptX / aptX-HD / SBC。
-ハイレゾ音源も 48kHz/16bit 以下へ変換されるため、USB DAC と同じ音は出ない。
+起動オプションと相手機器の対応の重なりで決まる。install.sh は SBC / aptX /
+aptX HD / LDAC を有効にする（AAC は有効にしていない）。サンプリングレートは
+接続時に機器どうしが決め、MPD の出力をそのレートへ合わせて変換する
+（:meth:`kotone.playback.PlaybackController._match_bluetooth_stream`）。
+そのため USB DAC のようなビットパーフェクト再生にはならない。
 """
 
 from __future__ import annotations
