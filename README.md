@@ -48,7 +48,7 @@ Sony NW-ZX300 のような軽快な操作感を、Raspberry Pi + USB DAC の環�
 Raspberry Pi OS (Lite, 64bit / Bookworm 以降) を書き込み・起動済みの Pi 上で:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/USER/kotone/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/okinu-chan/kotone/main/install.sh | sudo bash
 ```
 
 または、リポジトリを clone してから:

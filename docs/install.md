@@ -19,7 +19,7 @@
 ## 2. インストール
 
 ```bash
-git clone https://github.com/USER/kotone.git
+git clone https://github.com/okinu-chan/kotone.git
 cd kotone
 sudo ./install.sh --music-dir /mnt/music
 ```

@@ -1,6 +1,6 @@
 [Unit]
 Description=kotone — 日本語ネイティブ音楽プレイヤー (バックエンド)
-Documentation=https://github.com/USER/kotone
+Documentation=https://github.com/okinu-chan/kotone
 After=network-online.target mpd.service
 Wants=network-online.target
 # MPD が落ちていてもバックエンドは起動する（UI から状態を確認できるようにするため）

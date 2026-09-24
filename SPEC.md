@@ -9,6 +9,7 @@
   要件とコードが食い違う場合は、この文書がコードの実態を表します。
 - [docs/design-notes.md](docs/design-notes.md) には古くなった記述が含まれます（7.5 節）。
 - 確認した時点: 2026-09-25（この文書を追加したコミット）
+- リポジトリ: <https://github.com/okinu-chan/kotone>（公開、MIT License）
 - **更新の決まり:** コードを変えたら、同じコミットで SPEC.md と
   [CHANGELOG.md](CHANGELOG.md) も更新します。
 
@@ -654,7 +655,7 @@ Pi 上では `sudo -u kotone kotone-cli <コマンド>` で実行します（`do
 ### 6.1 インストール
 
 ```bash
-git clone <このリポジトリの URL>
+git clone https://github.com/okinu-chan/kotone.git
 cd kotone
 sudo ./install.sh --music-dir /mnt/music
 ```
@@ -752,7 +753,6 @@ npm run build
 | 再生キュー画面（`/queue`）へのリンクが画面のどこにも無い。URL を直接開けば表示される | `router.svelte.js` に経路があるが、遷移させるコードが無い |
 | シャッフル中の曲戻しでは、次の曲の音量を先回りして入れない。Bluetooth などバッファの深い出力では、補正後の音量になるまで遅れる | `PlaybackController.previous`（MPD がどの曲へ戻すか分からないため） |
 | `install.sh` の `--unattended` は受け付けるが、何にも使われていない | `install.sh` で変数を設定するだけ |
-| GitHub の URL が仮の `USER/kotone` のまま | `install.sh`（`REPO_URL`）、`README.md`、`docs/install.md`、`systemd/kotone.service`（`Documentation=`） |
 | 高音質コーデックの優先順に AAC があるが、bluealsa の起動オプションで AAC を有効にしていないため、AAC は選ばれない | `bluetooth.py` の `CODEC_PRIORITY` と `install.sh` の bluealsa の `ExecStart` |
 
 ### 7.2 未実装の機能（要件・設計メモにあるが、コードに無いもの）
