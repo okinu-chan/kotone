@@ -46,6 +46,13 @@ DEFAULT_SCAN_SECONDS = 12.0
 #: A2DP Sink（イヤホン・スピーカー側）を持つ機器が対象。
 A2DP_SINK_UUID = "0000110b-0000-1000-8000-00805f9b34fb"
 
+#: 機器の種別（Class of Device）の大分類「Audio/Video」。
+#:
+#: 探索の応答にサービス UUID を載せない機器がある（Technics EAH-AZ100 など。
+#: UUID はペアリング後の問い合わせで初めて分かる）。そうした機器でも種別は
+#: 載せているので、UUID が無くても Audio/Video なら音を出せる機器とみなす。
+COD_MAJOR_AUDIO_VIDEO = 0x04
+
 #: 音質の優先順（前ほど優先）。
 #:
 #: 実際に使えるのは「Pi 側が対応しているもの」と「機器が提示したもの」の
@@ -71,7 +78,7 @@ class BluetoothDevice:
     connected: bool
     icon: str | None
     rssi: int | None
-    #: 音を受け取れる機器か（A2DP Sink を持つ）
+    #: 音を受け取れる機器か（A2DP Sink を持つか、種別が Audio/Video）
     audio: bool
 
     def as_dict(self) -> dict[str, Any]:
@@ -445,8 +452,19 @@ def _to_device(props: dict[str, Any]) -> BluetoothDevice:
         connected=bool(_value(props.get("Connected"), False)),
         icon=_value(props.get("Icon")),
         rssi=_value(props.get("RSSI")),
-        audio=A2DP_SINK_UUID in uuids,
+        audio=A2DP_SINK_UUID in uuids or _is_audio_video_class(_value(props.get("Class"))),
     )
+
+
+def _is_audio_video_class(cod: Any) -> bool:
+    """機器の種別（Class of Device）の大分類が Audio/Video か。
+
+    大分類は 8〜12 ビット目。種別を載せない機器（BLE だけの機器など）は False。
+    """
+    try:
+        return (int(cod) >> 8) & 0x1F == COD_MAJOR_AUDIO_VIDEO
+    except (TypeError, ValueError):
+        return False
 
 
 def _pair_hint(exc: Exception) -> str:

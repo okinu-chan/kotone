@@ -66,7 +66,7 @@ Raspberry Pi 上で動く、日本語ネイティブの音楽プレイヤーで�
 | ソフトウェア | Python 3.13.5、MPD 0.24.4、bluez-alsa 4.3.1 |
 | 音楽用ドライブ | USB 接続の SSD（ext4、`/mnt/music` にマウント） |
 | USB DAC | Topping E50 II |
-| Bluetooth 機器 | JBL Tour Pro 3、Sony NW-ZX300（Bluetooth 受信）、Amazon Echo Dot |
+| Bluetooth 機器 | JBL Tour Pro 3、Technics EAH-AZ100、Sony NW-ZX300（Bluetooth 受信）、Amazon Echo Dot |
 | 操作端末 | Windows PC のブラウザ、iPhone 15 Pro の Safari |
 
 ---
@@ -592,7 +592,9 @@ Bluetooth 出力は、そのレートに固定します（`allowed_formats`。�
   - 先に新しい方を有効にしてから、他を無効にします。
   - Bluetooth 出力は bluez-alsa の `bluealsa` デバイスで、「最後に接続した機器」を指します。
 - 機器の探索・ペアリング・接続は BlueZ の D-Bus API を直接使います。
-  一覧に出すのは、A2DP Sink を持つ機器と、登録済みの機器です。
+  一覧に出すのは、音を出せる機器と、登録済みの機器です。音を出せる機器とは、
+  A2DP Sink の UUID を持つ機器か、機器の種別（Class of Device）の大分類が
+  Audio/Video の機器です（`_to_device`、`_is_audio_video_class`）。
 - **高音質コーデックの優先**（設定がオンのとき）: 画面からペアリング・接続した 1 秒後に、
   使えるうちで一番上位のコーデックへ切り替えます。優先順は LDAC → aptX HD → aptX → AAC → SBC です。
 - 接続中のコーデックは 5 秒間キャッシュします。再生中画面と設定画面に表示します。
@@ -784,6 +786,9 @@ npm run build
   `Bonded: no` と表示される。JBL Tour Pro 3 では、リンクキーが保存されず、
   登録が失われることが繰り返し起きた。
 - bluez-alsa は、再生の開始と終了のたびにログへ `PCM drop` を出すことがある。
+- Technics EAH-AZ100 は、ペアリングモードでの探索に対して名前と種別
+  （`Class: 0x00240404`、Audio/Video のヘッドセット）だけを返し、サービス UUID を
+  1 つも返さない（2026-10-15、未ペアリングの状態で確認）。
 
 ### 7.5 古くなった文書の記述
 
@@ -838,6 +843,7 @@ npm run build
 |---|---|---|
 | 出力先は常に 1 つだけ有効にする | MPD は有効な出力すべてへ同時に流すため、同じ音が二重に鳴る | `outputs.py` |
 | Pi は送る側（a2dp-source）だけにする | 受け側を有効にすると、受信音声を DAC へ流す bluealsa-aplay が MPD と出力を奪い合う | `install.sh` |
+| 未登録の機器は、A2DP Sink の UUID が無くても種別が Audio/Video なら一覧に出す | 探索の応答に UUID を載せない機器がある。UUID だけで絞ると Technics EAH-AZ100 が一覧に出ず、ペアリングできなかった | `_is_audio_video_class` |
 | Bluetooth は bluetoothctl を使わず D-Bus を直接使う | 対話前提の作りで出力の解析が不安定だった（エージェント登録の取りこぼし） | `bluetooth.py` |
 | Bluetooth ではウォームアップをしない | A2DP では不要で、曲頭へのシークが原因で鳴り始めの数秒が途切れた | `_start_with_warmup` |
 | Bluetooth へ送る形式を、接続中のレートに固定する | bluez-alsa のプラグインは、求められたレートが違うと接続を設定し直す。NW-ZX300 はこれを拒否し（AVDTP OPEN を Bad State で拒否）、接続の表示を残したまま音が出なくなった | `_match_bluetooth_stream` |
