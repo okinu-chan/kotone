@@ -20,7 +20,7 @@ KOTONE の変更を新しい順に記録します。バージョン番号（`bac
 - Bluetooth の探索で、Technics EAH-AZ100 が一覧に出ずペアリングできなかった。
   一覧は A2DP Sink の UUID を持つ機器に絞っていたが、AZ100 は探索の応答に UUID を
   載せない。機器の種別（Class of Device）の大分類が Audio/Video の機器も、
-  音を出せる機器とみなすようにした
+  音を出せる機器とみなすようにした `5a71333`
 
 ---
 
