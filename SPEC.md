@@ -758,6 +758,10 @@ npm install
 npm run build
 ```
 
+`frontend/index.html` と `frontend/dist/index.html` は `.gitattributes` で LF に固定しています。
+元が CRLF だと、Vite が `<script>` 行を除くときに単独の CR を残します。単独の CR は Git が
+正規化できないため、Pi のクローンでは常に変更ありと判定され、`kotone-update` の pull が止まります。
+
 ---
 
 ## 7. 既知の不具合と未実装の機能

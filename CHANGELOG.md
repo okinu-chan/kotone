@@ -18,10 +18,12 @@ KOTONE の変更を新しい順に記録します。バージョン番号（`bac
 
 ### 修正
 - Pi で `kotone-update` が `frontend/dist/index.html` の「ローカルの変更」で pull を中止した。
-  このファイルが CRLF と LF の混在のまま登録されており（Windows では `frontend/index.html` が CRLF で
-  取り出され、Vite が LF の行を足すため）、`text` 属性で LF に揃えると差分が出る状態だった。
-  一度 CR を含んで登録されると Git は以後も正規化しないので、`git add --renormalize` で LF に直した
-  `d1d895b`
+  Windows では `frontend/index.html` が CRLF で取り出され、Vite が `<script>` 行を除くときに
+  単独の CR を 1 つ残すため、dist/index.html が CRLF・LF・単独 CR の混在で登録されていた。
+  単独 CR は Git が LF に正規化できず、Pi では取り出すたびに変更ありと判定される。
+  `.gitattributes` で `frontend/index.html` と `frontend/dist/index.html` を `eol=lf` にし、
+  ビルドし直して LF だけにした。`d1d895b` の `--renormalize` は単独 CR のため効かなかった
+  （コミット ID は次のコミットで記入）
 
 ### 追加
 - 再生中画面の背景に、アートワークをぼかして敷くアンビエント表示を加えた。

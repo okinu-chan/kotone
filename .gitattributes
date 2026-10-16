@@ -5,6 +5,10 @@
 *.template       text eol=lf
 *.sql            text eol=lf
 scripts/*        text eol=lf
+# Vite は <script> 行を除くとき CR を 1 つ残すため、元が CRLF だと
+# dist/index.html に単独の CR が混ざり、Git が正規化できなくなる（Pi で pull が止まる）
+frontend/index.html      text eol=lf
+frontend/dist/index.html text eol=lf
 
 # 通常のテキストは Git の自動判定に任せる
 *.py             text
