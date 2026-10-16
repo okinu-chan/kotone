@@ -79,6 +79,8 @@
 <style>
   .app {
     min-height: 100%;
+    /* 再生中画面の背景（z-index: -1）をこの中の最背面に留め、body の背景の下に潜らせない */
+    isolation: isolate;
     padding-bottom: calc(var(--tabbar-height) + var(--safe-bottom));
   }
 

@@ -13,7 +13,8 @@
   import Modal from './Modal.svelte';
   import ScrollingTitle from './ScrollingTitle.svelte';
   import VolumeControl from './VolumeControl.svelte';
-  import { api } from '../api.js';
+  import { fade } from 'svelte/transition';
+  import { api, artworkUrl } from '../api.js';
   import { formatCodec, formatQuality, formatTime, ORDER_LABELS, REPEAT_LABELS } from '../format.js';
   import { player, settings, toast } from '../stores.svelte.js';
   import { router } from '../router.svelte.js';
@@ -33,6 +34,13 @@
     return gain == null ? null : gain.toFixed(1);
   });
   const album = $derived(track ? { id: track.album_id, artwork: track.artwork } : null);
+  /**
+   * 背景（アンビエント）に敷く画像。
+   *
+   * 強くぼかすので解像度は要らない。一覧用の small を拡大して使い、
+   * 曲が変わるたびに大きな画像を読み直さないようにする。
+   */
+  const ambientUrl = $derived(artworkUrl(album, 'small'));
   const progress = $derived(player.duration > 0 ? (player.elapsed / player.duration) * 100 : 0);
 
   /**
@@ -111,6 +119,19 @@
     }
   }
 </script>
+
+<!-- アートワークをぼかして画面全体に敷く。曲が変わったら新旧を重ねて切り替える。
+     ぼかしと色の合成は端末側の描画で、Pi は small の画像を配るだけ -->
+<div class="ambient" aria-hidden="true">
+  <!-- フェードは {#key} の直下に置いた local 遷移なので、曲が変わったときだけ動く。
+       global にすると、ほかの画面へ移るときも再生中画面がフェードの間だけ残る -->
+  {#if ambientUrl}
+    {#key ambientUrl}
+      <img src={ambientUrl} alt="" decoding="async" transition:fade={{ duration: 600 }} />
+    {/key}
+  {/if}
+  <div class="veil"></div>
+</div>
 
 <section class="now">
   {#if !player.state.connected}
@@ -344,6 +365,59 @@
 </Modal>
 
 <style>
+  /* 画面全体の背面に固定する。z-index: -1 は .app（isolation: isolate）の中での
+     最背面なので、body の背景より上、ほかの内容より下に描かれる */
+  .ambient {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    overflow: hidden;
+    pointer-events: none;
+    background: var(--bg);
+  }
+
+  /* 縁がぼけて背景色が透けないよう、拡大してはみ出させる。
+     静止画を 1 回ぼかすだけで、ぼかしの値は動かさない（端末の負荷を抑える） */
+  .ambient img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    filter: blur(48px) saturate(1.5);
+    transform: scale(1.3);
+  }
+
+  /* 文字と操作部を読めるように、テーマの背景色を重ねて沈める。
+     下ほど濃くして、操作ボタンの周りのコントラストを確保する */
+  .veil {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--bg) 30%, transparent),
+      color-mix(in srgb, var(--bg) 45%, transparent) 55%,
+      color-mix(in srgb, var(--bg) 70%, transparent)
+    );
+  }
+
+  /* 白地のジャケットがライトテーマの背景に溶けないよう、少し濃く沈める */
+  :global(:root[data-theme='light']) .veil {
+    background: linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--bg) 55%, transparent),
+      color-mix(in srgb, var(--bg) 70%, transparent) 55%,
+      color-mix(in srgb, var(--bg) 85%, transparent)
+    );
+  }
+
+  /* 「透明度を下げる」がオンの端末では、ぼかしを出さずテーマの背景色だけにする */
+  @media (prefers-reduced-transparency: reduce) {
+    .ambient img {
+      display: none;
+    }
+  }
+
   .now {
     display: flex;
     flex-direction: column;
@@ -429,7 +503,8 @@
     min-height: 34px;
     padding: 6px 12px;
     border-radius: 999px;
-    background: var(--surface);
+    /* 背景のアートワークの色が透けるよう、半透明にする */
+    background: color-mix(in srgb, var(--surface) 60%, transparent);
     border: 1px solid var(--border);
     color: var(--text);
     font-size: var(--fs-md);
@@ -658,7 +733,7 @@
     min-height: var(--tap);
     border-radius: var(--radius);
     border: 1px solid var(--border);
-    background: var(--surface);
+    background: color-mix(in srgb, var(--surface) 60%, transparent);
     color: var(--text-muted);
     font-size: var(--fs-lg);
   }
