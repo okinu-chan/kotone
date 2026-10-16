@@ -288,6 +288,10 @@ WebSocket の ping 間隔 20 秒・待ち 30 秒、keep-alive 75 秒、終了待
   内容は再生・一時停止、次の曲、音量で、本体をタップすると再生中画面へ移ります。
 - サーバーとの接続が切れている間は、画面上部に「サーバーと再接続中…」と出ます。
 - テーマ（ダーク／ライト）と文字の大きさ（小・標準・大）を設定で変えられます。
+- ホーム画面に追加してウェブアプリとして開くと、ページはステータスバーの下まで描かれます
+  （`index.html` の `viewport-fit=cover` と `black-translucent`）。画面の上端に来る要素
+  （`PageHeader.svelte`、再生中画面の `.now` など）は `--safe-top`
+  （`env(safe-area-inset-top)`）の分だけ下げています。
 
 ### 4.2 再生中画面（`NowPlaying.svelte`）
 

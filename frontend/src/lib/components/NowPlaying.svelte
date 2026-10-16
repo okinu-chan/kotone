@@ -348,7 +348,8 @@
     display: flex;
     flex-direction: column;
     gap: 18px;
-    padding: 12px 20px 24px;
+    /* ホーム画面のウェブアプリではステータスバーの下まで描かれるので、その高さを足す */
+    padding: calc(12px + var(--safe-top)) 20px 24px;
     max-width: 560px;
     margin: 0 auto;
   }
@@ -670,7 +671,7 @@
   @media (min-width: 900px) {
     .now {
       max-width: 620px;
-      padding-top: 24px;
+      padding-top: calc(24px + var(--safe-top));
     }
 
     .title {
