@@ -23,7 +23,7 @@ KOTONE の変更を新しい順に記録します。バージョン番号（`bac
   単独 CR は Git が LF に正規化できず、Pi では取り出すたびに変更ありと判定される。
   `.gitattributes` で `frontend/index.html` と `frontend/dist/index.html` を `eol=lf` にし、
   ビルドし直して LF だけにした。`d1d895b` の `--renormalize` は単独 CR のため効かなかった
-  （コミット ID は次のコミットで記入）
+  `86a1fc0`
 
 ### 追加
 - 再生中画面の背景に、アートワークをぼかして敷くアンビエント表示を加えた。
