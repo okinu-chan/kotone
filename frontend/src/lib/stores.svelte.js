@@ -249,7 +249,12 @@ class SettingsStore {
 export const settings = new SettingsStore();
 
 export function applyTheme(theme) {
-  document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
+  const root = document.documentElement;
+  root.dataset.theme = theme === 'light' ? 'light' : 'dark';
+  // ホーム画面のウェブアプリでは、ステータスバーの帯が theme-color の色になる。
+  // テーマの背景色に合わせ、ライトテーマで帯だけ黒く残らないようにする。
+  const bg = getComputedStyle(root).getPropertyValue('--bg').trim();
+  if (bg) document.querySelector('meta[name="theme-color"]')?.setAttribute('content', bg);
 }
 
 /**

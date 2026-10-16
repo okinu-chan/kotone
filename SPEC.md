@@ -288,10 +288,13 @@ WebSocket の ping 間隔 20 秒・待ち 30 秒、keep-alive 75 秒、終了待
   内容は再生・一時停止、次の曲、音量で、本体をタップすると再生中画面へ移ります。
 - サーバーとの接続が切れている間は、画面上部に「サーバーと再接続中…」と出ます。
 - テーマ（ダーク／ライト）と文字の大きさ（小・標準・大）を設定で変えられます。
-- ホーム画面に追加してウェブアプリとして開くと、ページはステータスバーの下まで描かれます
-  （`index.html` の `viewport-fit=cover` と `black-translucent`）。画面の上端に来る要素
-  （`PageHeader.svelte`、再生中画面の `.now` など）は `--safe-top`
-  （`env(safe-area-inset-top)`）の分だけ下げています。
+- ホーム画面に追加してウェブアプリとして開いたときのステータスバーは、
+  `apple-mobile-web-app-status-bar-style` を `default` にして、ページと重ねない単色の帯に
+  しています（`index.html`）。帯の色は `theme-color` で、テーマを適用するたびに
+  背景色 `--bg` へ合わせます（`stores.svelte.js` の `applyTheme`）。
+  画面の上端に来る要素（`PageHeader.svelte`、再生中画面の `.now` など）は、ページが
+  ステータスバーの下まで描かれる場合に備えて `--safe-top`（`env(safe-area-inset-top)`）の
+  分だけ下げています。
 
 ### 4.2 再生中画面（`NowPlaying.svelte`）
 
@@ -871,6 +874,7 @@ npm run build
 | 曲一覧の各行は、曲ではなく位置で区別する | プレイリストには同じ曲が入りうる。曲で区別すると描画が止まり「読み込み中」のままになった | `TrackList.svelte` |
 | アルバムアートはクロップせず、拡大もしない。PNG で 3 階層を事前生成する | 原盤の比率を保ち、リサイズ以外の劣化を足さない。配信時に計算しない | `library/artwork.py` |
 | `index.html` は `Cache-Control: no-cache` で配る | 読み込む JS / CSS のファイル名を持つため。付けないとホーム画面のウェブアプリが古い `index.html` をキャッシュから開き続け、更新が画面に出ない | `main.py` |
+| ウェブアプリのステータスバーは `black-translucent` ではなく `default` | 内容をステータスバーの下に潜らせると、iOS 26 ではその部分にぼかしが重なる（実機で観測）。`ScanBanner` などの `top: 0` の帯も潜らずに済む | `index.html` |
 
 ### 信頼性
 
