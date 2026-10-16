@@ -270,3 +270,19 @@ def test_artwork_404_when_missing(client: TestClient) -> None:
 
 def test_openapi_is_available(client: TestClient) -> None:
     assert client.get("/api/openapi.json").status_code == 200
+
+
+# ------------------------------------------------------------------ フロントエンド
+
+
+def test_index_html_is_revalidated(library: Config) -> None:  # noqa: F811
+    """index.html は毎回確かめさせ、古い画面がキャッシュから出続けないようにする。"""
+    static_dir = library.resolved_static_dir
+    (static_dir / "assets").mkdir(parents=True, exist_ok=True)
+    (static_dir / "index.html").write_text("<!doctype html>", encoding="utf-8")
+
+    with TestClient(create_app(library)) as client:
+        for path in ("/", "/library"):
+            response = client.get(path)
+            assert response.status_code == 200
+            assert response.headers["cache-control"] == "no-cache"

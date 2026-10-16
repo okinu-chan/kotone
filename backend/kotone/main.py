@@ -102,6 +102,10 @@ def _mount_frontend(app: FastAPI, config: Config) -> None:
         app.mount("/assets", StaticFiles(directory=assets), name="assets")
 
     index_file = static_dir / "index.html"
+    # index.html は読み込む JS / CSS のファイル名（ハッシュ付き）を持つので、毎回確かめさせる。
+    # Cache-Control が無いと、ホーム画面のウェブアプリは古い index.html をキャッシュから
+    # 開き続け、更新した画面が出ない。
+    index_headers = {"Cache-Control": "no-cache"}
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def spa(request: Request, full_path: str) -> FileResponse:
@@ -117,7 +121,7 @@ def _mount_frontend(app: FastAPI, config: Config) -> None:
 
         if full_path and candidate.is_file():
             return FileResponse(candidate)
-        return FileResponse(index_file)
+        return FileResponse(index_file, headers=index_headers)
 
 
 def get_app() -> FastAPI:
