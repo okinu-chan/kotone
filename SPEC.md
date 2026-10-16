@@ -305,6 +305,8 @@ WebSocket の ping 間隔 20 秒・待ち 30 秒、keep-alive 75 秒、終了待
   曲が変わると 0.6 秒で新旧を重ねて切り替えます。端末の「透明度を下げる」
   （`prefers-reduced-transparency: reduce`）がオンのときは、テーマの背景色だけにします。
   チップと下部のボタンは、背景の色が透けるよう半透明（60 %）にしています。
+  設定「アンビエント表示」（`ambient_background`、既定オン）でオフにできます。オフのときと、
+  設定を読み込む前は出しません（オフにしている人に一瞬だけ背景が見えないように）。
 - **曲送り・曲戻し（スワイプ）:** アートワークの上を横にスワイプします。
   横に 60 px 以上動き、かつ縦の動きの 1.8 倍を超えたときだけ反応します。
   範囲の終端では左スワイプ（曲送り）を受け付けません（4.10 節）。
@@ -654,6 +656,7 @@ Pi 上では `sudo -u kotone kotone-cli <コマンド>` で実行します（`do
 | `default_library_sort` | ライブラリの既定ソート | `album` / `artist` / `genre` / `year` / `added` | `album` | 表示 |
 | `album_layout` | アルバム一覧の表示形式 | `grid`（サムネイル）/ `list`（1 列） | `grid` | 表示（ライブラリのボタンでも切り替え） |
 | `theme` | テーマ | `dark` / `light` | `dark` | 表示 |
+| `ambient_background` | アンビエント表示 | 真偽 | オン | 表示 |
 | `font_size` | 文字の大きさ | `small` / `normal` / `large` | `normal` | 表示 |
 | `bluetooth_prefer_quality` | 高音質コーデックを優先する | 真偽 | オン | Bluetooth のカード |
 | `initial_search_by` | 頭文字で絞り込む対象 | `artist` / `album` | `artist` | イニシャルサーチの画面 |

@@ -40,7 +40,12 @@
    * 強くぼかすので解像度は要らない。一覧用の small を拡大して使い、
    * 曲が変わるたびに大きな画像を読み直さないようにする。
    */
-  const ambientUrl = $derived(artworkUrl(album, 'small'));
+  /**
+   * 設定でオフのときは出さない。設定を読み込む前も出さず、
+   * オフにしている人に一瞬だけ背景が見えることを避ける。
+   */
+  const ambientOn = $derived(settings.loaded && settings.values.ambient_background !== false);
+  const ambientUrl = $derived(ambientOn ? artworkUrl(album, 'small') : null);
   const progress = $derived(player.duration > 0 ? (player.elapsed / player.duration) * 100 : 0);
 
   /**
@@ -122,18 +127,20 @@
 
 <!-- アートワークをぼかして画面全体に敷く。曲が変わったら新旧を重ねて切り替える。
      ぼかしと色の合成は端末側の描画で、Pi は small の画像を配るだけ -->
-<div class="ambient" aria-hidden="true">
-  <!-- フェードは {#key} の直下に置いた local 遷移なので、曲が変わったときだけ動く。
-       global にすると、ほかの画面へ移るときも再生中画面がフェードの間だけ残る -->
-  {#if ambientUrl}
-    {#key ambientUrl}
-      <img src={ambientUrl} alt="" decoding="async" transition:fade={{ duration: 600 }} />
-    {/key}
-  {/if}
-  <div class="veil"></div>
-</div>
+{#if ambientOn}
+  <div class="ambient" aria-hidden="true">
+    <!-- フェードは {#key} の直下に置いた local 遷移なので、曲が変わったときだけ動く。
+         global にすると、ほかの画面へ移るときも再生中画面がフェードの間だけ残る -->
+    {#if ambientUrl}
+      {#key ambientUrl}
+        <img src={ambientUrl} alt="" decoding="async" transition:fade={{ duration: 600 }} />
+      {/key}
+    {/if}
+    <div class="veil"></div>
+  </div>
+{/if}
 
-<section class="now">
+<section class="now" class:ambient-on={ambientOn}>
   {#if !player.state.connected}
     <div class="offline">
       <p>MPD に接続できていません。</p>
@@ -503,8 +510,7 @@
     min-height: 34px;
     padding: 6px 12px;
     border-radius: 999px;
-    /* 背景のアートワークの色が透けるよう、半透明にする */
-    background: color-mix(in srgb, var(--surface) 60%, transparent);
+    background: var(--surface);
     border: 1px solid var(--border);
     color: var(--text);
     font-size: var(--fs-md);
@@ -513,6 +519,17 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     transition: background 0.15s;
+  }
+
+  /* アンビエント表示のときは、背景のアートワークの色が透けるよう半透明にする */
+  .ambient-on .chip,
+  .ambient-on .album-link {
+    background: color-mix(in srgb, var(--surface) 60%, transparent);
+  }
+
+  .ambient-on .chip:hover,
+  .ambient-on .album-link:hover {
+    background: color-mix(in srgb, var(--surface-hover) 75%, transparent);
   }
 
   .chip:hover {
@@ -733,7 +750,7 @@
     min-height: var(--tap);
     border-radius: var(--radius);
     border: 1px solid var(--border);
-    background: color-mix(in srgb, var(--surface) 60%, transparent);
+    background: var(--surface);
     color: var(--text-muted);
     font-size: var(--fs-lg);
   }

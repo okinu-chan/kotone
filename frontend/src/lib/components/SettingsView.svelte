@@ -50,7 +50,7 @@
       title: 'ライブラリ',
       keys: ['artist_separators', 'ignore_leading_article', 'scan_on_start'],
     },
-    { title: '表示', keys: ['default_library_sort', 'album_layout', 'theme', 'font_size'] },
+    { title: '表示', keys: ['default_library_sort', 'album_layout', 'theme', 'ambient_background', 'font_size'] },
   ];
 
   const ENUM_LABELS = {
