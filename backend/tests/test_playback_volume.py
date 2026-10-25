@@ -760,6 +760,33 @@ async def test_warmup_still_runs_on_usb_dac(db, settings) -> None:
     assert [c[0] for c in mpd.calls] == ["setvol", "play", "seek", "setvol"]
 
 
+async def test_warmup_stops_a_fade_still_in_flight(db, settings) -> None:
+    """音量を変えた直後に再生を始めても、ウォームアップ中にフェードが音量を戻さないこと。
+
+    実機（2026-10-25）: 音量の操作方法を「KOTONE」にしてスライダーを 20 にした直後に
+    範囲を再生すると、0.12 秒のフェードがウォームアップの無音（setvol 0）の上から
+    78 まで上げ続けた。終わった時点の 78 を外部からの変更と誤認し、スライダーが
+    20 から 78 になった（8 回中 8 回）。
+    """
+    mpd = FakeMPD(state="stop")
+    mpd.volume = 100
+    mpd.queue_items = [{"file": "a.flac"}]
+    repo = FakeRepo({"a.flac": {"track_gain_db": 11.8, "track_peak": 0.06,
+                                "album_gain_db": 11.8, "album_peak": 0.06}})
+    ctrl = PlaybackController(mpd, db, repo, settings, EventBus(), outputs=_Outputs(False))
+    ctrl.user_volume = 20
+    settings.set("startup_warmup_ms", 50)
+
+    await ctrl._apply_loudness(await mpd.status(), fade=0.12)   # 100 → 78 のフェード
+    await ctrl._start_with_warmup(0)
+    await asyncio.sleep(0.15)          # フェードが生きていれば、ここまでに送り終える
+
+    muted = mpd.volumes.index(0)
+    assert mpd.volumes[muted + 1:] == [78]   # 無音のあとは、最後に入れる 78 だけ
+    await ctrl._reconcile_external_volume()
+    assert ctrl.user_volume == 20
+
+
 # ------------------------- 出力バッファが埋まる前に、次の曲の音量を入れておく
 
 

@@ -743,8 +743,13 @@ class PlaybackController:
             return
 
         try:
-            await self.mpd.set_volume(0)          # ウォームアップ中は無音にする
+            # ウォームアップ中は無音にする。直前の音量操作のフェードが残っていると、
+            # この 0 の上から音量を戻し続け、終わった値を外部からの変更と誤認して
+            # スライダーの値が変わる（実機で再現）。先にフェードを止め、期待値も
+            # 送る前に記録する（_return_to_scope_top と同じ）
+            self._cancel_fade()
             self._expected_volume = 0
+            await self._send_volume(0)
             await self.mpd.play(position)
             await asyncio.sleep(warmup_ms / 1000)
             # デバイスが開いた状態で曲頭へ戻す。開けなかったときは戻さない
