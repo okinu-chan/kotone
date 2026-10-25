@@ -26,9 +26,10 @@
    *
    * 補正がオフのときの計測値は、いま鳴っている音と関係がないので出さない。
    * 「アルバム」設定ではアルバム単位の値が効いているので、そちらを出す。
+   * DSD をそのまま送っている曲では補正を止めているので出さない。
    */
   const loudnessGain = $derived.by(() => {
-    if (!settings.values.loudness_enabled || !track) return null;
+    if (!settings.values.loudness_enabled || !track || player.state.volume_locked) return null;
     const gain =
       settings.values.loudness_mode === 'album' ? track.album_gain_db : track.track_gain_db;
     return gain == null ? null : gain.toFixed(1);
@@ -204,6 +205,10 @@
         {#if formatQuality(track)}<span class="sep">·</span>{formatQuality(track)}{/if}
         {#if loudnessGain}
           <span class="sep">·</span>ラウドネス補正 {loudnessGain} dB
+        {/if}
+        {#if track.is_dsd && player.state.output_format}
+          <!-- DSD のまま届いているか（ネイティブ / DoP / PCM に変換）を確かめられるように -->
+          <span class="sep">·</span>{player.state.output_format.label}
         {/if}
         {#if player.state.bluetooth_codec}
           <!-- 何のコーデックで繋がっているか、機器側で分からない機種が多い -->

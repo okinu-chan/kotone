@@ -8,6 +8,10 @@
    *
    * 音量をアンプ側で取る構成（設定「音量の操作方法」＝外部）ではアイコンごと
    * 出さない。KOTONE 側のスライダーは効かないため。
+   *
+   * DSD をそのまま DAC へ送っている曲（DSD の出力方式＝ネイティブ / DoP）では、
+   * 音量が 100 に固定されている。アイコンは残し、開くと止めたバーと理由を出す。
+   * 何も出さないと、押しても効かない理由が分からない。
    */
   import { api } from '../api.js';
   import { player } from '../stores.svelte.js';
@@ -23,7 +27,8 @@
   let open = $state(false);
   let root = $state(null);
 
-  const volume = $derived(player.state.volume ?? 60);
+  const locked = $derived(Boolean(player.state.volume_locked));
+  const volume = $derived(locked ? 100 : (player.state.volume ?? 60));
   const enabled = $derived(player.state.volume_control !== 'external');
 
   function onInput(event) {
@@ -68,7 +73,7 @@
     </button>
 
     {#if open}
-      <div class="panel">
+      <div class="panel" class:locked>
         <span class="value tabular">{volume}</span>
         <input
           class="bar"
@@ -77,8 +82,15 @@
           max="100"
           value={volume}
           oninput={onInput}
-          aria-label="音量"
+          disabled={locked}
+          aria-label={locked ? '音量（DSD をそのまま送っているため固定）' : '音量'}
         />
+        {#if locked}
+          <p class="reason">
+            DSD をそのまま DAC へ送っているため、音量は最大に固定しています。
+            DAC かアンプで調整してください。
+          </p>
+        {/if}
       </div>
     {/if}
   </div>
@@ -135,6 +147,21 @@
 
   .volume:not(.up) .panel {
     top: calc(100% + 8px);
+  }
+
+  .panel.locked {
+    width: 12.5em;
+  }
+
+  .panel.locked .bar {
+    opacity: 0.4;
+  }
+
+  .reason {
+    margin: 0;
+    font-size: var(--fs-sm);
+    line-height: 1.5;
+    color: var(--text-muted);
   }
 
   .value {

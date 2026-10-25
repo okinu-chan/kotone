@@ -11,6 +11,10 @@
   次曲を先にキューへ入れておくことで MPD の gapless 機構がそのまま効く。
 * **ラウドネス補正** … 曲が変わるたびに ``setvol`` で実効音量を計算し直す。
   UI に見せるのはユーザーが設定した音量のほうで、補正値は裏に隠す。
+* **DSD の音量バイパス** … DSD を USB DAC へそのまま（ネイティブ / DoP）送って
+  いる曲のあいだは、音量を 100 に固定してラウドネス補正を止める。MPD の
+  ソフトウェア音量は DSD を素通しにするので、スライダーを動かしても音は
+  変わらない（:mod:`kotone.outputs` の冒頭を参照）。
 """
 
 from __future__ import annotations
@@ -20,12 +24,14 @@ import logging
 import random
 import re
 from dataclasses import dataclass, field
+from pathlib import PurePosixPath
 from typing import Any, Literal
 
 from kotone.db import Database
 from kotone.events import EventBus
+from kotone.library.tags import DSD_EXTENSIONS
 from kotone.mpdclient import MPDConnection, MPDUnavailable
-from kotone.outputs import BLUETOOTH_OUTPUT_NAME
+from kotone.outputs import BLUETOOTH_OUTPUT_NAME, read_alsa_hw_params
 from kotone.repository import LibraryRepository
 from kotone.settings import SettingsStore
 
@@ -112,6 +118,8 @@ class PlaybackController:
         self._fade_task: asyncio.Task[None] | None = None
         #: 最後に MPD へ送った音量（フェードを途中から引き継ぐときの起点）
         self._last_sent_volume: int | None = None
+        #: いまの音量が DSD の音量バイパス（100 固定）によるものか
+        self._bypassing = False
         self._last_song_id: str | None = None
         # 一時停止した位置と、そのときの曲（再開時のズレ補正に使う）
         self._paused_at: float | None = None
@@ -134,6 +142,7 @@ class PlaybackController:
             try:
                 await self._apply_mode_flags()
                 await self._disable_crossfade()
+                await self.apply_dsd_output()
             except MPDUnavailable:
                 log.warning("起動時に MPD へ設定を反映できませんでした")
 
@@ -169,9 +178,11 @@ class PlaybackController:
     async def _on_mpd_event(self, subsystems: set[str]) -> None:
         try:
             if "connection" in subsystems and self.mpd.connected:
-                # 再接続時にモードを入れ直す
+                # 再接続時にモードを入れ直す。MPD が再起動していても DSD の出力方式
+                # （dop 属性と USB DAC の 2 出力のどちらか）が設定どおりになるように
                 await self._apply_mode_flags()
                 await self._disable_crossfade()
+                await self.apply_dsd_output()
             if "mixer" in subsystems:
                 await self._reconcile_external_volume()
             if "player" in subsystems:
@@ -691,13 +702,17 @@ class PlaybackController:
         無く、逆に曲頭へ戻すシークがストリームの取り直し（bluealsa の
         "PCM drop"）を招いて、鳴り始めの数秒が途切れる。実機のログで、
         再生開始の 1〜2 秒後に必ず PCM drop が出ていることを確認した。
+
+        DSD をそのまま送る曲でも行わない。setvol 0 が DSD に効かないので、
+        無音にならずに曲頭の数百 ms が 2 回鳴ってしまう。
         """
         await self._prepare_output()
         # 出力バッファは play の直後に一気に埋まる。埋まる前に音量を入れる
         await self._preset_loudness(position)
 
         warmup_ms = int(self.settings.get("startup_warmup_ms") or 0)
-        if warmup_ms <= 0 or await self._bluetooth_output():
+        if (warmup_ms <= 0 or await self._bluetooth_output()
+                or await self._dsd_bypass(await self._path_at(position))):
             await self.mpd.play(position)
             return
 
@@ -756,6 +771,33 @@ class PlaybackController:
         """
         await self._apply_loudness(await self.mpd.status(), fade=USER_VOLUME_FADE_SECONDS)
 
+    async def apply_dsd_output(self) -> None:
+        """設定「DSD の出力方式」を MPD の出力へ反映する。
+
+        USB DAC の 2 つの出力は同じ機器を指すので、鳴っている最中には入れ
+        替えられない（新しいほうが開けずに一時停止する。実測）。dop 属性も
+        出力を開き直すまで効かない。そこで、入れ替えるときや DSD の曲を
+        鳴らしているときは一時停止してから反映し、止めた位置から再開する。
+        一時停止中なら MPD は機器を閉じているので、そのまま入れ替えられる。
+        """
+        if self.outputs is None:
+            return
+        mode = self.settings.get("dsd_output") or "pcm"
+        status = await self.mpd.status()
+        reopen = False
+        if status.get("state") == "play":
+            song = await self.mpd.current_song()
+            is_dsd = PurePosixPath(song.get("file") or "").suffix.lower() in DSD_EXTENSIONS
+            reopen = is_dsd or await self.outputs.dsd_mode_needs_swap(mode)
+        if reopen:
+            await self.pause()
+        try:
+            await self.outputs.apply_dsd_mode(mode)
+        finally:
+            if reopen:
+                await self.play()
+        await self.refresh_volume()
+
     async def _reconcile_external_volume(self) -> None:
         """他クライアント等が音量を変えた場合に、その値を新しいユーザー基準にする。
 
@@ -766,6 +808,8 @@ class PlaybackController:
         """
         if self.external_volume:
             return  # 音量はアンプ側で取る構成なので追随しない
+        if self._bypassing:
+            return  # DSD をそのまま送っている間は音量が効かない。100 は自分で入れた値
         if self._fading:
             # フェード中は自分の setvol が次々と mixer イベントを生む。観測値が
             # 1 つ前の段の値になることがあり、外部からの変更と見分けられない。
@@ -790,9 +834,17 @@ class PlaybackController:
 
         ``fade`` を指定すると、その秒数をかけて今の音量から移す。曲の変わり目で
         一気に変えると段差がノイズになるため（:data:`SONG_CHANGE_FADE_SECONDS`）。
+
+        DSD の音量バイパスに入るとき・出るときはフェードしない。DSD には音量が
+        効かないので段差は生まれず、DSD から PCM へ戻るときにフェードすると、
+        PCM の曲の頭が最大音量から下りてくることになる。
         """
-        factor = await self._current_factor()
-        effective = max(0, min(100, round(self._base_volume() * factor)))
+        song = await self.mpd.current_song()
+        effective, bypass = await self._volume_for(song.get("file"))
+        was_bypassing = self._bypassing
+        self._bypassing = bypass
+        if bypass or was_bypassing:
+            fade = 0.0
         try:
             current = int(status.get("volume", -1))
         except (TypeError, ValueError):
@@ -839,12 +891,18 @@ class PlaybackController:
         path = (song or {}).get("file")
         if not path:
             return
-        factor = await self._factor_for_path(path)
-        effective = max(0, min(100, round(self._base_volume() * factor)))
+        effective, bypass = await self._volume_for(path)
+        if bypass:
+            # DSD には音量が効かないので、鳴り始めてから 100 にすれば足りる
+            # （曲が変わったときの _apply_loudness が入れる）。先に上げると、
+            # 捨てられる前の今の曲が一瞬だけ最大音量で鳴る
+            return
         if effective == self._expected_volume:
             return
         self._cancel_fade()
         self._expected_volume = effective
+        # 今が DSD のバイパス中でも、DSD は音量で変わらないので先に下げてよい
+        self._bypassing = False
         await self._send_volume(effective)
 
     async def _send_volume(self, value: int) -> None:
@@ -881,15 +939,47 @@ class PlaybackController:
         except MPDUnavailable:
             log.debug("音量フェード中に MPD との接続が切れました")
 
-    async def _current_factor(self) -> float:
-        """現在の曲に適用すべき音量倍率。補正が無効なら 1.0。"""
-        if not self.settings.get("loudness_enabled"):
-            return 1.0
-        song = await self.mpd.current_song()
-        path = song.get("file")
-        if not path:
-            return 1.0
-        return await self._factor_for_path(path)
+    async def _volume_for(self, path: str | None) -> tuple[int, bool]:
+        """その曲を鳴らすときに MPD へ入れる音量と、DSD の音量バイパスか。"""
+        if await self._dsd_bypass(path):
+            return 100, True
+        factor = await self._factor_for_path(path) if path else 1.0
+        return max(0, min(100, round(self._base_volume() * factor))), False
+
+    async def _dsd_bypass(self, path: str | None) -> bool:
+        """その曲を、音量を掛けずに DSD のまま DAC へ送るか。
+
+        設定ではなく、いま有効な出力で決める。USB DAC のビットパーフェクト側
+        （ネイティブ / DoP）なら DSD はそのまま出ていく。USB DAC (PCM) と
+        Bluetooth では MPD が PCM に変換するので、音量もラウドネス補正も効く。
+        「PCM に変換」を選んでいても mpd.conf に USB DAC (PCM) が無ければ、
+        ビットパーフェクト側で鳴るのでバイパスになる。
+
+        出力が分からないときはバイパスしない。DSD がそのまま出ていくなら音量は
+        どのみち効かず、PCM に変換されるならユーザーの音量が効く。どちらでも
+        100 に上げるより大きくはならない。
+        """
+        if not path or PurePosixPath(path).suffix.lower() not in DSD_EXTENSIONS:
+            return False
+        if self.outputs is None:
+            return False
+        try:
+            active = await self.outputs.active()
+        except Exception:
+            log.debug("出力先を取得できませんでした", exc_info=True)
+            return False
+        if not active:
+            return False
+        return not (active.get("bluetooth") or active.get("dsd_pcm"))
+
+    async def _path_at(self, position: int | None) -> str | None:
+        if position is None or position < 0:
+            return None
+        try:
+            song = await self.mpd.song_at(position)
+        except MPDUnavailable:
+            return None
+        return (song or {}).get("file")
 
     async def _factor_for_path(self, path: str) -> float:
         """指定した曲に適用すべき音量倍率。補正が無効なら 1.0。"""
@@ -927,6 +1017,7 @@ class PlaybackController:
                 "order": self.order_mode,
                 "volume": self.user_volume,
                 "volume_control": self.settings.get("volume_control"),
+                "volume_locked": False,
                 "state": "stop",
                 "can_next": False,
             }
@@ -935,6 +1026,9 @@ class PlaybackController:
         track = None
         if song.get("file"):
             track = await asyncio.to_thread(self.repo.get_track_by_path, song["file"])
+        output = await self._output_state()
+        audio = _parse_audio_format(status.get("audio"))
+        bypass = await self._dsd_bypass(song.get("file"))
 
         state = {
             "connected": True,
@@ -952,14 +1046,22 @@ class PlaybackController:
             # 終端では曲送りを受け付けない。押しても効かない理由が分かるよう、
             # 画面側でボタンを無効に見せるために返す
             "can_next": not await self.at_queue_end(status),
-            "audio": _parse_audio_format(status.get("audio")),
+            "audio": audio,
             "bitrate": _int_or_none(status.get("bitrate")),
             "track": track,
             "raw_file": song.get("file"),
             # 出力を開けなかったときなど。MPD は黙って一時停止するだけなので、
             # 理由を画面に出すために返す
             "error": describe_mpd_error(status.get("error")),
-            **await self._output_state(),
+            **output,
+            "dsd_output": self.settings.get("dsd_output"),
+            # DSD をそのまま送っている曲。音量は 100 に固定し、スライダーを止める
+            "volume_locked": bypass,
+            # DAC へ実際に送っている形式（DSD64 ネイティブ / DoP / PCM に変換 など）
+            "output_format": describe_output_format(
+                audio, output.get("output"),
+                await asyncio.to_thread(read_alsa_hw_params) if self.outputs else None,
+            ),
         }
         self._cached_state = state
         return state
@@ -1085,18 +1187,84 @@ def _float_or_none(value: Any) -> float | None:
 
 
 def _parse_audio_format(value: str | None) -> dict[str, Any] | None:
-    """MPD の ``audio`` フィールド（``44100:16:2`` 等）を分解する。"""
+    """MPD の ``audio`` フィールド（``44100:16:2`` 等）を分解する。
+
+    DSD は ``dsd64:2`` の形で来る（MPD 0.24.4 で実測）。``dsd_rate`` に
+    64 / 128 … を入れ、``samplerate`` は 1bit のレート（DSD64 なら 2822400）にする。
+    """
     if not value:
         return None
     parts = str(value).split(":")
+    if len(parts) == 2 and parts[0].lower().startswith("dsd"):
+        dsd_rate = _int_or_none(parts[0][3:])
+        return {
+            "samplerate": dsd_rate * 44100 if dsd_rate else None,
+            "bit_depth": 1,
+            "is_dsd": True,
+            "dsd_rate": dsd_rate,
+            "channels": _int_or_none(parts[1]),
+            "raw": value,
+        }
     if len(parts) < 3:
         return None
     samplerate, bits, channels = parts[0], parts[1], parts[2]
     return {
         "samplerate": _int_or_none(samplerate),
-        # DSD は bits が "dsd" になる
         "bit_depth": _int_or_none(bits),
-        "is_dsd": str(bits).lower().startswith("dsd"),
+        "is_dsd": False,
+        "dsd_rate": None,
         "channels": _int_or_none(channels),
         "raw": value,
     }
+
+
+def describe_output_format(
+    audio: dict[str, Any] | None,
+    output: dict[str, Any] | None,
+    hw: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """DAC へ実際に送っている形式を、画面に出せる形にする。
+
+    ``hw`` は ALSA の hw_params（:func:`kotone.outputs.read_alsa_hw_params`）。
+    機器を開いているときだけ取れる（一時停止中は MPD が閉じるので取れない）。
+    取れないときは MPD の出力設定から推定し、``verified`` を False にする。
+
+    E50 II での実測（2026-10-25）: DSD64 はネイティブで ``DSD_U32_BE`` 88200 Hz、
+    DoP で ``S32_LE`` 176400 Hz、PCM 変換で ``S32_LE`` 352800 Hz になる。
+    """
+    if not audio or not output:
+        return None
+    hw_format = (hw or {}).get("format") or ""
+    hw_rate = (hw or {}).get("rate")
+    verified = hw is not None
+
+    if output.get("bluetooth"):
+        kind = "pcm_converted" if audio["is_dsd"] else "pcm"
+        label = "PCM に変換（Bluetooth）" if audio["is_dsd"] else "PCM（Bluetooth）"
+        return {"kind": kind, "label": label, "verified": False, "hw": None}
+
+    if not audio["is_dsd"]:
+        rate = hw_rate or audio.get("samplerate")
+        label = f"PCM {_khz(rate)}" if rate else "PCM"
+        return {"kind": "pcm", "label": label, "verified": verified, "hw": hw}
+
+    dsd = f"DSD{audio['dsd_rate']}" if audio.get("dsd_rate") else "DSD"
+    if output.get("dsd_pcm"):
+        # MPD は DSD64 を 352.8 kHz の PCM にする（実測）
+        rate = hw_rate if verified else (audio.get("samplerate") or 0) // 8 or None
+        label = f"PCM {_khz(rate)} に変換" if rate else "PCM に変換"
+        return {"kind": "pcm_converted", "label": label, "verified": verified, "hw": hw}
+    if verified:
+        dop = not hw_format.startswith("DSD_")
+    else:
+        dop = bool(output.get("dop"))
+    if dop:
+        return {"kind": "dop", "label": f"{dsd} DoP", "verified": verified, "hw": hw}
+    return {"kind": "dsd_native", "label": f"{dsd} ネイティブ", "verified": verified, "hw": hw}
+
+
+def _khz(rate: int | None) -> str:
+    if not rate:
+        return ""
+    khz = rate / 1000
+    return f"{khz:g}kHz" if khz == int(khz) else f"{khz:.1f}kHz"

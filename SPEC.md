@@ -83,8 +83,9 @@ kotone-backend（Python / FastAPI / uvicorn。ポート 8088、ワーカー 1）
    │  MPD プロトコル（localhost:6600）      ├─ SQLite（/var/lib/kotone/library.sqlite3）
    ▼                                         ├─ D-Bus（BlueZ・bluez-alsa の操作）
 MPD                                          └─ rsgain / ffmpeg（ラウドネス計測・画像抽出）
-   ├─ 出力「USB DAC」 → ALSA → USB DAC
-   └─ 出力「Bluetooth」→ ALSA（bluealsa）→ BlueZ → BT 機器
+   ├─ 出力「USB DAC」      → ALSA → USB DAC（ビットパーフェクト。DSD はネイティブ / DoP）
+   ├─ 出力「USB DAC (PCM)」→ ALSA → 同じ USB DAC（DSD を PCM に変換して送る）
+   └─ 出力「Bluetooth」    → ALSA（bluealsa）→ BlueZ → BT 機器
 ```
 
 常駐するもの（systemd）:
@@ -139,7 +140,7 @@ MPD                                          └─ rsgain / ffmpeg（ラウド�
 │   │   ├── settings.py      利用者設定（SQLite に保存。画面から変更）
 │   │   ├── playback.py      再生制御（スコープ・リピート・ランダム・音量・ラウドネス補正）
 │   │   ├── mpdclient.py     MPD 接続（再接続・idle 購読）
-│   │   ├── outputs.py       出力先（USB DAC / Bluetooth）の切り替え
+│   │   ├── outputs.py       出力先（USB DAC / Bluetooth）の切り替え、DSD の出力方式、ALSA の hw_params
 │   │   ├── bluetooth.py     Bluetooth 機器の管理（BlueZ / bluez-alsa を D-Bus で操作）
 │   │   ├── storage.py       音楽用ドライブの見張り
 │   │   ├── repository.py    ライブラリの検索・並べ替えクエリ
@@ -262,7 +263,12 @@ WebSocket の ping 間隔 20 秒・待ち 30 秒、keep-alive 75 秒、終了待
 - `auto_update "no"`（ライブラリの更新は KOTONE のスキャンから指示する）
 - `audio_buffer_size "4096"`、`gapless_mp3_playback "yes"`、`bind_to_address "localhost"`
 - 出力「USB DAC」: ALSA。`auto_resample` / `auto_format` / `auto_channels` を `no`
-  （ビットパーフェクト）、`dop "no"`、`device` は指定なし（ALSA の default）
+  （ビットパーフェクト）、`dop "no"`、`device` は指定なし（ALSA の default）。
+  `dop` は KOTONE が実行時に `outputset` で切り替えます（4.10 節）。
+- 出力「USB DAC (PCM)」: 「USB DAC」と同じ機器を指す 2 つ目の出力。`filters "dsd2pcm"`
+  を通し、既定は無効。`device` は「USB DAC」と同じにする必要があります。
+- フィルタ `dsd2pcm`: FFmpeg のフィルタ（`graph "anull"`）。中身は何もしませんが、
+  FFmpeg のフィルタは PCM しか受け付けないため、MPD がその手前で DSD を PCM にします。
 - 出力「Bluetooth」: ALSA の `bluealsa` デバイス。`auto_*` は `yes`、既定は無効
 - 入力の `curl` は無効、デコーダは `ffmpeg` を有効
 
@@ -317,6 +323,9 @@ WebSocket の ping 間隔 20 秒・待ち 30 秒、keep-alive 75 秒、終了待
 - **音声情報の行:** コーデック、サンプリングレート／ビット深度を表示します。
   さらに次の 2 つを条件付きで表示します。
   - ラウドネス補正がオンのときだけ、補正値。「アルバム」基準ならアルバム単位の値を出します。
+    DSD をそのまま送っている曲では出しません（補正を止めているため）。
+  - DSD の曲では、DAC へ実際に送っている形式（「DSD64 ネイティブ」「DSD64 DoP」
+    「PCM 352.8kHz に変換」「PCM に変換（Bluetooth）」）。4.10 節の `output_format` です。
   - Bluetooth 出力のときは、使っているコーデック名。
 - **操作ボタン**（左から）:
   - 再生順: 通常再生 → シャッフル（重複なし）→ ランダム（重複あり）の順に切り替え
@@ -325,6 +334,8 @@ WebSocket の ping 間隔 20 秒・待ち 30 秒、keep-alive 75 秒、終了待
   - リピート: なし → 範囲内 → 1 曲の順に切り替え
 - **音量:** スピーカーのアイコンをタップすると、アイコンの上に縦のバーと数値が出ます。
   もう一度タップで消えます。音量の操作方法が「外部」のときはアイコンごと出しません（`VolumeControl.svelte`）。
+  DSD をそのまま送っている曲（再生状態の `volume_locked`）では、バーを 100 で止めて操作できなくし、
+  「DSD をそのまま DAC へ送っているため、音量は最大に固定しています。DAC かアンプで調整してください。」と出します。
 - **シークバー:** ドラッグで再生位置を移動します。
 - **その他のボタン:**
   - 「このアルバムを最初から再生」
@@ -427,7 +438,8 @@ MPD のキューの中身を表示し、タップした曲を単独で再生し�
 上から次の順に並びます。
 
 1. **ライブラリ:** 曲数などの統計、「スキャン」「完全に再スキャン」、前回の結果
-2. **出力先**（`AudioOutput.svelte`）: 「USB DAC」「Bluetooth」のどちらか 1 つを選びます
+2. **出力先**（`AudioOutput.svelte`）: 「USB DAC」「Bluetooth」のどちらか 1 つを選びます。
+   「USB DAC (PCM)」は一覧に出さず、「USB DAC」として扱います（4.13 節）
 3. **Bluetooth:**
    - 「Bluetooth を使う」（電源）
    - 「高音質コーデックを優先する」
@@ -440,7 +452,8 @@ MPD のキューの中身を表示し、タップした曲を単独で再生し�
      先に 6 曲ほどを試しに測って見積もりを合わせます。
    - アーティストの区切り文字の欄には「実データの区切り文字を調べる」があります
      （区切り文字の候補ごとの件数と例を表示）。
-5. **システム:** バージョンとスキーマ番号、MPD の接続状態と出力形式、音楽ディレクトリ、
+5. **システム:** バージョンとスキーマ番号、MPD の接続状態と出力形式、DAC へ送っている形式
+   （ALSA の hw_params が取れれば、その format とレートも）、音楽ディレクトリ、
    データ領域の使用量、外部ツール（rsgain・ffmpeg・形態素解析器）の有無
 
 ### 4.10 再生の仕組み（`playback.py`）
@@ -482,10 +495,55 @@ MPD のキューの中身を表示し、タップした曲を単独で再生し�
   - 次の曲は MPD の `nextsong` で求めます。
   - シャッフル中の曲戻しは、戻り先が分からないので先回りしません。
 - 音量の操作方法やラウドネス補正の設定を変えると、その場で音量を計算し直します。
+  出力先を切り替えたときも計算し直します（下の DSD の音量バイパスが変わるため）。
+
+**DSD の音量バイパス:** DSD の曲（拡張子 `.dsf` `.dff`）を、出力「USB DAC」
+（ビットパーフェクト側）で鳴らしている間は、MPD の音量を 100 に固定し、ラウドネス
+補正を当てません。設定ではなく、いま有効な出力で決めます（`_dsd_bypass`）。
+
+- 「USB DAC (PCM)」と Bluetooth では MPD が PCM に変換するので、DSD の曲にも
+  音量とラウドネス補正が効きます。
+- 「PCM に変換」を選んでいても `mpd.conf` に「USB DAC (PCM)」が無ければ、
+  「USB DAC」で鳴るのでバイパスします。
+- 出力が分からないとき（取得に失敗したとき）はバイパスしません。
+- バイパスに入るとき・出るときは、音量をフェードせず一度で入れます。
+- 曲送り・曲戻し・再生開始の先回りでは、行き先が DSD なら 100 を先に入れません。
+  曲が変わってから入れます。今が DSD で行き先が PCM なら、PCM の音量を先に入れます。
+- バイパス中は、MPD の外で音量が変わっても追随しません。スライダーの値は覚えておき、
+  PCM の曲に戻ったら使います。
+- 再生状態に `volume_locked`（バイパス中か）と `dsd_output`（設定値）を含めます。
+
+**DSD の出力方式の反映**（`apply_dsd_output`）: 設定 `dsd_output` を MPD へ反映します。
+起動時、MPD への再接続時、設定を変えたときに行います。
+
+1. 出力「USB DAC」の属性 `dop` を、`dop` なら 1、それ以外なら 0 にします（値が同じなら送りません）。
+2. USB DAC で聴いているときは、`pcm` なら「USB DAC (PCM)」、`native` / `dop` なら
+   「USB DAC」を有効にします。同じ機器なので、先に今のほうを無効にします。
+   Bluetooth で聴いているときは切り替えず、USB DAC を選んだときに方式に合うほうを有効にします。
+3. 再生中で、出力を入れ替えるとき、または DSD の曲を鳴らしているときは、先に一時停止し、
+   反映してから再開します（一時停止からの再開と同じく、止めた位置へ戻します）。
+4. 最後に音量を計算し直します。
+
+**DAC へ送っている形式**（`describe_output_format`、再生状態の `output_format`）:
+MPD の `audio`（DSD は `dsd64:2` の形）、有効な出力、ALSA の hw_params から決めます。
+
+| 状態 | `kind` | 表示の例 |
+|---|---|---|
+| DSD・USB DAC・hw_params の format が `DSD_` で始まる | `dsd_native` | DSD64 ネイティブ |
+| DSD・USB DAC・hw_params の format が PCM | `dop` | DSD64 DoP |
+| DSD・USB DAC (PCM) | `pcm_converted` | PCM 352.8kHz に変換（レートは hw_params。取れなければ 1bit のレート ÷ 8） |
+| DSD・Bluetooth | `pcm_converted` | PCM に変換（Bluetooth） |
+| PCM | `pcm` | PCM 44.1kHz（Bluetooth なら PCM（Bluetooth）） |
+
+- hw_params は `/proc/asound/card*/pcm*p/sub*/hw_params` を読みます。`stream0` がある
+  カード（USB オーディオ）だけを見て、`closed` でない最初のものを使います（`read_alsa_hw_params`）。
+- hw_params が取れないとき（停止・一時停止中など）は、出力の `dop` 属性から推定し、
+  `verified` を偽にします。
 
 **再生開始時のウォームアップ**（USB DAC のとき）: 停止状態から再生するときは、
 無音で先に再生します。設定の時間（既定 600 ms）が過ぎたら曲頭へ戻します。
-Bluetooth では行いません。出力を開けなかったときは曲頭へ戻しません。
+Bluetooth では行いません。DSD の音量バイパスになる曲でも行いません（`setvol 0` が
+DSD に効かないため、曲頭が 2 回鳴る）。出力を開けなかったときは曲頭へ戻しません。
 
 **一時停止からの再開:** 止めた位置から 0.4 秒を超えてずれていたら、止めた位置へ戻します。
 再開に失敗したときは戻しません。
@@ -516,6 +574,8 @@ Bluetooth 出力は、そのレートに固定します（`allowed_formats`。�
      .wv .ape .wma .mpc .dsf .dff .m4b`
    - 名前が `.` で始まるファイル・フォルダは飛ばします。
 2. **タグの取り込み:** mutagen で読みます。DSD（`.dsf` `.dff`）には DSD の印を付けます。
+   ラウドネス計測は DSD の曲も対象にします（PCM に変換するときに補正に使うため）。
+   rsgain は DSD を受け付けないので、DSD を含むアルバムは FFmpeg で測ります（7.4 節）。
 3. **アーティストの分割:**
    - タグが複数値（Vorbis Comment や ID3 の TPE1）なら、そのまま使います。
    - 単一値なら、設定の区切り文字で分割します。
@@ -604,7 +664,11 @@ Bluetooth 出力は、そのレートに固定します（`allowed_formats`。�
     LDAC は品質 high で、電波状態に応じてビットレートを下げます（`--ldac-abr`）。
     SBC は `--sbc-quality=xq` です。
 - 出力先は MPD の出力の有効／無効で切り替え、常に 1 つだけを有効にします。
-  - 先に新しい方を有効にしてから、他を無効にします。
+  - 先に新しい方を有効にしてから、他を無効にします。ただし「USB DAC」と
+    「USB DAC (PCM)」の間は同じ機器なので、先に今のほうを無効にします。
+  - 一覧（`GET /outputs`）では「USB DAC (PCM)」を「USB DAC」に畳み込みます。どちらかが
+    有効なら「USB DAC」が有効と見せ、`dsd_pcm`（PCM 変換側か）と `dop` を添えます。
+    「USB DAC (PCM)」を直接選ぶことはできません。
   - Bluetooth 出力は bluez-alsa の `bluealsa` デバイスで、「最後に接続した機器」を指します。
 - 機器の探索・ペアリング・接続は BlueZ の D-Bus API を直接使います。
   一覧に出すのは、音を出せる機器と、登録済みの機器です。音を出せる機器とは、
@@ -639,6 +703,7 @@ Pi 上では `sudo -u kotone kotone-cli <コマンド>` で実行します（`do
 | キー | 画面の名前 | 型・選択肢 | 既定値 | 画面の場所 |
 |---|---|---|---|---|
 | `volume_control` | 音量の操作方法 | `kotone`（画面のスライダー）/ `external`（アンプ側で調整。MPD を最大に保つ） | `kotone` | 再生 |
+| `dsd_output` | DSD の出力方式 | `pcm`（PCM に変換。音量を操作できる）/ `native`（ネイティブ）/ `dop`（DoP） | `pcm` | 再生 |
 | `startup_warmup_ms` | 再生開始時のウォームアップ (ms) | 整数 0〜3000 | 600 | 再生 |
 | `gapless_enabled` | ギャップレス再生 | 真偽 | オン | 再生（**効果なし。7.1 節**） |
 | `random_avoid_last` | ランダム時に直前の曲を避ける数 | 整数 0〜20 | 1 | 再生 |
@@ -663,6 +728,7 @@ Pi 上では `sudo -u kotone kotone-cli <コマンド>` で実行します（`do
 
 - 範囲外の数値は最小・最大に丸めます。選択肢に無い値はエラーになります。
 - 音量の操作方法・ラウドネス補正の 4 項目を変えると、再生中の音量をその場で計算し直します（`api/system.py` の `VOLUME_SETTINGS`）。
+- DSD の出力方式を変えると、MPD の出力へその場で反映します（4.10 節）。
 - 設定の変更は WebSocket で全画面に配られ、再読み込みなしで反映されます。
 - デプロイ設定（環境変数）は 3.6 節を見てください。
 
@@ -712,7 +778,7 @@ sudo ./install.sh --music-dir /mnt/music
 
 インストール後、ブラウザで `http://<Pi のホスト名またはIP>:8088/` を開きます。
 USB DAC を指定する場合は `/etc/mpd.conf` の `device` を書き、MPD を再起動します
-（`docs/install.md` 3.1）。
+（`docs/install.md` 3.1）。「USB DAC」と「USB DAC (PCM)」の両方に同じ値を書きます。
 
 ### 6.2 起動・停止・状態確認
 
@@ -735,6 +801,10 @@ USB DAC を指定する場合は `/etc/mpd.conf` の `device` を書き、MPD �
 6. ドライブ自動復旧のファイルを入れ直す
 7. マイグレーションを適用する
 8. タイマーを有効化し、`kotone` を再起動する
+
+`/etc/mpd.conf` は書き換えません。2026-10-25 より前に入れた環境で DSD の「PCM に変換」を
+使うには、`config/mpd.conf.template` の「USB DAC (PCM)」の出力と `dsd2pcm` のフィルタを
+`/etc/mpd.conf` へ手で足し、MPD を再起動します（`docs/install.md` 3.1）。
 
 自動では更新しません。`/opt/kotone` は `kotone` ユーザーの持ち物で、このスクリプトは
 root で動きます。git がこれを拒まないよう、このリポジトリに限って `safe.directory`
@@ -779,13 +849,13 @@ npm run build
 | シャッフル中の曲戻しでは、次の曲の音量を先回りして入れない。Bluetooth などバッファの深い出力では、補正後の音量になるまで遅れる | `PlaybackController.previous`（MPD がどの曲へ戻すか分からないため） |
 | `install.sh` の `--unattended` は受け付けるが、何にも使われていない | `install.sh` で変数を設定するだけ |
 | 高音質コーデックの優先順に AAC があるが、bluealsa の起動オプションで AAC を有効にしていないため、AAC は選ばれない | `bluetooth.py` の `CODEC_PRIORITY` と `install.sh` の bluealsa の `ExecStart` |
+| 範囲を鳴らし終えて先頭で待機するとき、先頭が DSD の曲で音量バイパスになると、無音にするための `setvol 0` が効かず、`play` から `pause` までのごく短い間が最大音量で鳴る | `_return_to_scope_top`（DSD に音量が効かないことは 7.4 節） |
 
 ### 7.2 未実装の機能（要件・設計メモにあるが、コードに無いもの）
 
 | 内容 | 状態 |
 |---|---|
 | アーティストの統合 | API（`POST /edit/artists/merge`）はあるが、画面から使う手段が無い |
-| DSD の DoP の切り替え | `mpd.conf` の `dop` を手で書き換える必要がある。画面の設定は無い（`docs/design-notes.md` 7 章で「要検討」） |
 | タグ編集の音源ファイルへの書き戻し | 行わない方針（`editing.py`）。DB にだけ保存する |
 | 認証 | 無い。家庭内 LAN 専用 |
 
@@ -806,6 +876,29 @@ npm run build
   `Bonded: no` と表示される。JBL Tour Pro 3 では、リンクキーが保存されず、
   登録が失われることが繰り返し起きた。
 - bluez-alsa は、再生の開始と終了のたびにログへ `PCM drop` を出すことがある。
+- **DSD の再生（2026-10-25、Raspberry Pi 4B + Topping E50 II、MPD 0.24.4）:**
+  自作の DSD64 試験音（1 kHz・−30 dBFS の .dsf と .dff）で確かめた。
+  - E50 II は ALSA に `DSD_U32_BE` の altset を出す（`/proc/asound/card1/stream0`）。
+    `dop "no"` で DSD64 を鳴らすと、hw_params は `DSD_U32_BE` / 88200 Hz。
+  - 出力属性 `dop` は `outputset` で実行時に変えられ、次に出力を開いたときから効く。
+    `dop=1` では hw_params が `S32_LE` / 176400 Hz になる。
+  - 「USB DAC (PCM)」では `S32_LE` / 352800 Hz。PCM の曲は元のレートのまま。
+  - MPD のソフトウェア音量は DSD を変えない。ファイルへ書き出す出力（`pipe`）で、
+    音量 50 と 100 の出力がバイト単位で一致し、元の DSD のビット列とも一致した。
+  - 出力側の `format "*:24:*"` で PCM にしても、変換は音量より後ろで行われ
+    （ログ: `in=dsd64:2 -> f=dsd64:2 -> out=352800:24:2`）、音量は効かなかった。
+    `dsd2pcm` フィルタを通すと音量より前で PCM になり（`f=352800:24:2`）、音量 50 で
+    −18.5 dB 下がった。変換後の振幅は元と同じ（−30.0 dBFS）。
+  - `dsd2pcm` フィルタを通した PCM の曲は 32bit に広げられるが、値は 16bit・24bit とも
+    ビットをずらしただけと一致した（ノイズの FLAC で比較）。
+  - 同じ機器を指す 2 つの出力は、鳴っている最中に入れ替えると新しいほうが開けず、
+    `Failed to open audio output` で一時停止した。一時停止中・停止中なら入れ替えられる
+    （一時停止中は MPD が機器を閉じ、hw_params が `closed` になる）。
+  - rsgain は .dsf を「not of a supported type」として受け付けず、アルバムごと失敗する。
+    KOTONE は FFmpeg の ebur128 に切り替えて測れる。試験音の DSD は −29.0 LUFS と出た
+    （1bit の超高域ノイズを含むため、同じ振幅の正弦波だけの場合より約 1 dB 大きい）。
+  - Bluetooth で DSD を鳴らしたときの音量は確かめていない。Bluetooth の出力は形式の変換を
+    出力側（音量より後ろ）で行う設定なので、上の結果からは音量が効かないと考えられる。
 - Technics EAH-AZ100 は、ペアリングモードでの探索に対して名前と種別
   （`Class: 0x00240404`、Audio/Video のヘッドセット）だけを返し、サービス UUID を
   1 つも返さない（2026-10-15、未ペアリングの状態で確認）。
@@ -856,6 +949,12 @@ npm run build
 | 音量スライダーはアイコンをタップして出す縦バー。操作ボタンと同じ並びに置き、バーは上に出す | 横バーを常に出すと曲名を押しのける。下に置くと iPhone 15 Pro / Safari ではスクロールしないと届かない | `VolumeControl.svelte`、`NowPlaying.svelte` |
 | 音量の操作方法が「外部」なら MPD を最大に保ち、設定を変えたらその場で反映する | アンプ側で音量を取る構成でデジタル減衰を避ける。以前は次の曲まで下げた音量のまま残っていた | `playback.py`、`api/system.py` |
 | ラウドネス補正の値は、補正がオンのときだけ、基準に合った値を表示する | オフのときの値や、使っていない基準の値は、鳴っている音と関係がない | `NowPlaying.svelte` |
+| DSD をそのまま送る曲では音量を 100 に固定し、ラウドネス補正を止め、スライダーを止めて理由を出す | MPD のソフトウェア音量は DSD を素通しにする（7.4 節）。スライダーが動くのに音が変わらないと、壊れているように見える。100 にしておけば、将来 MPD が DSD に音量を掛けるようになっても DSD のまま届く | `_dsd_bypass`、`VolumeControl.svelte` |
+| DSD の出力方式の既定は「PCM に変換」 | アナログの音量つまみが無い DAC 直結や高感度のイヤホンで、DSD の曲が最大音量で鳴らないようにする。音量 100 固定になるのは、利用者がネイティブか DoP を選んだときだけ（2026-10-25、依頼者が決定） | `settings.py` |
+| 行き先が DSD のときは、曲送りの前に 100 を入れない。DSD から PCM へは先に下げる | DSD には音量が効かないので、DSD が鳴っている間に何を入れても音は変わらない。逆に 100 を先に入れると、捨てられる前の PCM の曲が一瞬だけ最大音量で鳴る | `_preset_loudness` |
+| バイパスの出入りではフェードしない | DSD 側では音量が効かないので段差が生まれない。DSD から PCM へフェードすると、PCM の曲の頭が最大音量から下りてくる | `_apply_loudness` |
+| 出力が分からないときはバイパスしない | DSD がそのまま出るなら音量はどのみち効かず、PCM に変換されるならユーザーの音量が効く。どちらでも 100 に上げるより大きくならない | `_dsd_bypass` |
+| DSD の曲を計測対象から外さない | PCM に変換するときは補正に使う。そのまま送るときはバイパスで使わない | `library/scanner.py`、`_dsd_bypass` |
 
 ### 出力・Bluetooth
 
@@ -869,6 +968,9 @@ npm run build
 | Bluetooth へ送る形式を、接続中のレートに固定する | bluez-alsa のプラグインは、求められたレートが違うと接続を設定し直す。NW-ZX300 はこれを拒否し（AVDTP OPEN を Bad State で拒否）、接続の表示を残したまま音が出なくなった | `_match_bluetooth_stream` |
 | 再生できなかった理由を画面に出し、始まらなかったときはシークしない | MPD は出力を開けないと黙って一時停止するだけ。しかもシークするとエラーが消える | `describe_mpd_error`、`_did_not_start` |
 | 接続中のコーデック名を表示する | 何のコーデックで繋がっているか、機器側で分からない機種が多い | `NowPlaying.svelte` |
+| DSD の PCM 変換は、同じ USB DAC を指す 2 つ目の出力（`dsd2pcm` フィルタ付き）で行い、切り替えは出力の有効／無効で行う | 出力側の形式指定で PCM にすると変換が音量より後ろになり、音量が効かない。デコーダを替える方法（dsf / dsdiff のデコーダを無効にして FFmpeg で読む）は音量が効くが、MPD の再起動が要り、KOTONE には root の権限が無い。出力の切り替えなら実行時にできる（7.4 節） | `outputs.py`、`config/mpd.conf.template` |
+| ネイティブと DoP の切り替えは、出力属性 `dop` を `outputset` で変える | `mpd.conf` の書き換えと MPD の再起動が要らない。次に出力を開いたときから効くことを実測した | `OutputController.apply_dsd_mode` |
+| DAC へ送っている形式は、MPD の `audio` ではなく ALSA の hw_params から決める | MPD の `audio` は DoP でもネイティブでも `dsd64:2` で、DAC へ何が届いているかは分からない | `read_alsa_hw_params`、`describe_output_format` |
 
 ### ライブラリ・画面
 

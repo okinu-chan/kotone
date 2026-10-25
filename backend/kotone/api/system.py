@@ -55,7 +55,10 @@ async def update_settings(ctx: Ctx, body: SettingsPatch) -> dict[str, Any]:
 
     # 再生に影響する設定は即座に MPD へ反映する
     if ctx.mpd.connected:
-        if VOLUME_SETTINGS & set(body.values):
+        if "dsd_output" in body.values:
+            # 出力の切り替えと音量の計算し直しまで行う
+            await ctx.player.apply_dsd_output()
+        elif VOLUME_SETTINGS & set(body.values):
             await ctx.player.refresh_volume()
         await ctx.player.broadcast_state()
 

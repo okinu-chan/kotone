@@ -6,13 +6,14 @@
   import { api } from '../api.js';
   import { formatBytes, formatDuration } from '../format.js';
   import { formatTime } from '../format.js';
-  import { scan, settings, toast } from '../stores.svelte.js';
+  import { player, scan, settings, toast } from '../stores.svelte.js';
 
   const GROUPS = [
     {
       title: '再生',
       keys: [
         'volume_control',
+        'dsd_output',
         'startup_warmup_ms',
         'gapless_enabled',
         'random_avoid_last',
@@ -70,6 +71,9 @@
     large: '大',
     kotone: 'KOTONE（画面のスライダー）',
     external: '外部（アンプ側で調整）',
+    pcm: 'PCM に変換（音量を操作できる）',
+    native: 'ネイティブ（DSD のまま）',
+    dop: 'DoP（DSD のまま）',
   };
 
   let system = $state(null);
@@ -355,6 +359,12 @@
         <dd class:offline={!system.mpd.connected}>
           {system.mpd.connected ? `接続中（${system.mpd.host}）` : '未接続'}
           {#if system.mpd.audio}<br />出力: {system.mpd.audio}{/if}
+          {#if player.state.output_format}
+            <br />DAC へ送っている形式: {player.state.output_format.label}
+            {#if player.state.output_format.hw}
+              （ALSA {player.state.output_format.hw.format} / {player.state.output_format.hw.rate} Hz）
+            {/if}
+          {/if}
         </dd>
         <dt>音楽ディレクトリ</dt>
         <dd><code>{system.paths.music_dir}</code></dd>

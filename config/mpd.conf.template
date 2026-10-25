@@ -57,11 +57,39 @@ audio_output {
     auto_format     "no"
     auto_channels   "no"
 
-    # DSD を DoP (DSD over PCM) で送る場合は yes にしてください。
-    # ネイティブ DSD 対応 DAC では no のままで構いません（要件 4.1）。
+    # DSD をネイティブで送るか DoP (DSD over PCM) で送るか。KOTONE が設定
+    # 「DSD の出力方式」に合わせて実行時に切り替える（outputset）ので、
+    # ここは no のままにしてください。
     dop             "no"
 
+    # DSD には、このソフトウェア音量が効かない（素通しになる。MPD 0.24.4 で
+    # 実測）。DSD をそのまま送る曲のあいだ、KOTONE は音量を 100 に固定する。
     mixer_type      "software"
+}
+
+audio_output {
+    type            "alsa"
+    name            "USB DAC (PCM)"
+
+    # DSD を PCM に変換して送るための 2 つ目の出力。上の「USB DAC」と同じ
+    # 機器を指すので、device は必ず同じにしてください。
+    # device        "hw:1,0"
+
+    auto_resample   "no"
+    auto_format     "no"
+    auto_channels   "no"
+
+    # 音量より前で DSD を PCM にする（下の filter を参照）。出力側の
+    # format / allowed_formats で PCM にすると、変換が音量より後ろになり、
+    # 音量が効かないままになる。PCM の曲は 32bit に広げられるだけで値は
+    # 変わらない（16bit・24bit とも、ずらしただけと一致することを実測）。
+    filters         "dsd2pcm"
+
+    mixer_type      "software"
+
+    # 既定は無効。KOTONE が「DSD の出力方式」に合わせて USB DAC と切り替える。
+    # 画面には出さず、「USB DAC」として扱う。
+    enabled         "no"
 }
 
 audio_output {
@@ -85,6 +113,17 @@ audio_output {
 }
 
 # HTTP ストリーミング等が必要になったらここに audio_output を追加します。
+
+# ---------------------------------------------------------------- フィルタ
+
+# 「USB DAC (PCM)」が使う。FFmpeg のフィルタは PCM しか受け付けないため、
+# MPD が手前で DSD を PCM（DSD64 なら 352.8 kHz）に変換する。anull なので
+# フィルタ自体は何もしない。
+filter {
+    plugin          "ffmpeg"
+    name            "dsd2pcm"
+    graph           "anull"
+}
 
 # ---------------------------------------------------------------- デコーダ
 

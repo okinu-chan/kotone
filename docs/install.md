@@ -62,7 +62,16 @@ aplay -l
 `"hw:1,0"` のように設定してから `sudo systemctl restart mpd` します。
 既定では ALSA の `default` を使うため、DAC が 1 台だけならそのままでも動きます。
 
-DSD をネイティブ再生できない DAC では `dop "yes"` を設定してください。
+DSD の送り方（PCM に変換 / ネイティブ / DoP）は、画面の設定「DSD の出力方式」で
+選びます。`mpd.conf` の `dop` は `"no"` のままにしてください（KOTONE が実行時に
+切り替えます）。
+
+「PCM に変換」には、USB DAC と同じ機器を指す 2 つ目の出力「USB DAC (PCM)」と、
+フィルタ `dsd2pcm` が要ります。`install.sh` が書く `mpd.conf` には入っています。
+2026-10-25 より前に入れた環境では、`config/mpd.conf.template` からこの 2 つを
+`/etc/mpd.conf` へ写し、「USB DAC (PCM)」の `device` を「USB DAC」と同じにしてから
+`sudo systemctl restart mpd` します。無いままでも再生はでき、DSD はそのまま
+（ネイティブか DoP で）送られます。
 
 ### 3.2 アーティスト名の区切り文字（重要）
 

@@ -64,6 +64,18 @@ SETTING_SPECS: tuple[SettingSpec, ...] = (
         "ヘッドホンアンプやプリアンプのつまみで音量を調整する構成向けです。",
         choices=("kotone", "external"),
     ),
+    SettingSpec(
+        "dsd_output", "pcm", "DSD の出力方式", "enum",
+        "USB DAC で DSD（.dsf / .dff）を鳴らすときの送り方です。"
+        "「PCM に変換」は DSD を PCM にしてから送るので、音量操作とラウドネス補正が"
+        "ほかの曲と同じように効きます。"
+        "「ネイティブ」と「DoP」は DSD をそのまま DAC へ送ります。DSD には KOTONE の"
+        "音量を掛けられないため、DSD の曲のあいだは最大音量に固定され、ラウドネス補正も"
+        "止まります。音量は DAC かアンプで調整してください。"
+        "ネイティブで鳴らない DAC では DoP を選びます。"
+        "Bluetooth ではこの設定に関係なく PCM に変換されます。",
+        choices=("pcm", "native", "dop"),
+    ),
     # --- ラウドネス補正 ------------------------------------------------
     SettingSpec(
         "loudness_enabled", True, "ラウドネス補正", "bool",

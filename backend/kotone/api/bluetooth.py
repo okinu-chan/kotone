@@ -45,9 +45,12 @@ async def list_outputs(ctx: Ctx) -> dict[str, Any]:
 @router.post("/outputs/select")
 async def select_output(ctx: Ctx, body: OutputRequest) -> dict[str, Any]:
     try:
-        items = await ctx.outputs.select(body.id)
+        items = await ctx.outputs.select(body.id, dsd_mode=ctx.settings.get("dsd_output"))
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    # DSD の曲は、USB DAC にそのまま送るときだけ音量を 100 に固定している。
+    # 出力先が変われば固定するかどうかも変わる
+    await ctx.player.refresh_volume()
     await ctx.player.broadcast_state()
     return {"items": items, "active": next((i for i in items if i["enabled"]), None)}
 
