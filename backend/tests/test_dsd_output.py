@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -154,6 +155,58 @@ async def test_unknown_output_does_not_raise_the_volume(db, settings) -> None:
     assert mpd.volumes == [40]
 
 
+class _EndingMPD(QueueMPD):
+    """曲の残り時間を返すフェイク（DSD の終わり際の受け渡しを試す）。"""
+
+    def __init__(self, remaining: float) -> None:
+        super().__init__(position=0, length=2)
+        self.duration = 20.0
+        self.elapsed = self.duration - remaining
+
+    async def status(self) -> dict:
+        base = await super().status()
+        base.update({"duration": self.duration, "elapsed": self.elapsed})
+        return base
+
+
+@pytest.mark.parametrize(("following", "expected"), [("b.flac", [100, 40]), ("c.dsf", [100])])
+async def test_dsd_hands_over_to_the_next_pcm_volume_before_it_ends(
+    db, settings, following, expected
+) -> None:
+    """自然な変わり目で DSD → PCM のとき、DSD の終わり際に PCM の音量へ下げる。
+
+    曲が変わってから下げると、開き直した出力のバッファが 100 のまま埋まる。
+    次も DSD なら 100 のまま。
+    """
+    mpd = _EndingMPD(remaining=1.5)
+    mpd.queue_items = [{"file": "a.dsf"}, {"file": following}]
+    mpd.song = {"file": "a.dsf"}
+    ctrl = _ctrl(db, settings, mpd, _Outputs(), paths=("a.dsf", "b.flac", "c.dsf"))
+    ctrl.user_volume = 80
+
+    await ctrl._apply_loudness(await mpd.status())
+    await ctrl._handover_task
+
+    assert mpd.volumes == expected
+
+
+async def test_handover_waits_while_the_dsd_has_time_left(db, settings) -> None:
+    mpd = _EndingMPD(remaining=30.0)
+    mpd.queue_items = [{"file": "a.dsf"}, {"file": "b.flac"}]
+    mpd.song = {"file": "a.dsf"}
+    ctrl = _ctrl(db, settings, mpd, _Outputs())
+    ctrl.user_volume = 80
+
+    await ctrl._apply_loudness(await mpd.status())
+    await asyncio.sleep(0.05)
+
+    assert mpd.volumes == [100]
+    # PCM の曲へ移ったら見張りはやめる
+    mpd.song = {"file": "b.flac"}
+    await ctrl._apply_loudness(await mpd.status())
+    assert ctrl._handover_task is None
+
+
 # ------------------------------------------------- 曲送り・再生開始での先回り
 
 
@@ -261,6 +314,7 @@ class OutputsMPD:
         return next(item for item in self.items if int(item["outputid"]) == int(output_id))
 
     async def command(self, name: str, *args):  # noqa: ANN201
+        await asyncio.sleep(0)   # 実際の MPD と同じく、ここで他の処理が割り込める
         if name == "outputs":
             return [dict(item) for item in self.items]
         self.log.append((name, *args))
@@ -328,6 +382,18 @@ async def test_dop_attribute_follows_the_mode() -> None:
 
     await controller.apply_dsd_mode("native")
     assert mpd.log == [("outputset", 0, "dop", "0")]
+
+
+async def test_concurrent_applies_swap_only_once(db, settings) -> None:
+    """起動時は start() と接続のイベントから同時に呼ばれる（実機のログで 2 回入れ替えていた）。"""
+    mpd = OutputsMPD(active="USB DAC")
+    player_mpd = FakeMPD(state="pause")
+    ctrl = _ctrl(db, settings, player_mpd, OutputController(mpd))
+
+    await asyncio.gather(ctrl.apply_dsd_output(), ctrl.apply_dsd_output())
+
+    assert mpd.log == [("disableoutput", 0), ("enableoutput", 1)]
+    assert mpd.enabled() == ["USB DAC (PCM)"]
 
 
 async def test_bluetooth_is_left_alone() -> None:

@@ -61,6 +61,15 @@ SONG_CHANGE_FADE_SECONDS = 0.35
 #: 音量スライダー操作を反映する時間（秒）。追従が遅れない範囲で段差を消す
 USER_VOLUME_FADE_SECONDS = 0.12
 
+#: DSD をそのまま送っている曲の終わる何秒前に、次の PCM の曲の音量を入れるか。
+#:
+#: DSD から PCM へ移ると MPD は出力を開き直し、出力バッファを一気に埋める。
+#: 曲が変わってから setvol しても、埋まった分は 100 のまま鳴る（実機で、曲が
+#: 変わってから音量が下がるまで 20 ms 前後の 100 を観測した）。DSD には音量が
+#: 効かないので、DSD の終わり際に下げておけば DSD の音は変わらない。バッファ
+#: （USB DAC で 1 秒未満）より十分長くとる。
+DSD_HANDOVER_SECONDS = 2.0
+
 #: フェード中に setvol を送る間隔（秒）。
 #:
 #: 細かいほど段差が小さくなる。1 段ごとに mixer イベントが返ってくるが、
@@ -120,6 +129,11 @@ class PlaybackController:
         self._last_sent_volume: int | None = None
         #: いまの音量が DSD の音量バイパス（100 固定）によるものか
         self._bypassing = False
+        #: DSD の出力方式の反映を 1 本ずつにする。起動時は start() と接続の
+        #: イベントから同時に呼ばれ、両方が出力を入れ替えようとしていた
+        self._dsd_lock = asyncio.Lock()
+        #: DSD の終わり際に次の PCM の曲の音量を入れる見張り（DSD_HANDOVER_SECONDS）
+        self._handover_task: asyncio.Task[None] | None = None
         self._last_song_id: str | None = None
         # 一時停止した位置と、そのときの曲（再開時のズレ補正に使う）
         self._paused_at: float | None = None
@@ -782,21 +796,22 @@ class PlaybackController:
         """
         if self.outputs is None:
             return
-        mode = self.settings.get("dsd_output") or "pcm"
-        status = await self.mpd.status()
-        reopen = False
-        if status.get("state") == "play":
-            song = await self.mpd.current_song()
-            is_dsd = PurePosixPath(song.get("file") or "").suffix.lower() in DSD_EXTENSIONS
-            reopen = is_dsd or await self.outputs.dsd_mode_needs_swap(mode)
-        if reopen:
-            await self.pause()
-        try:
-            await self.outputs.apply_dsd_mode(mode)
-        finally:
+        async with self._dsd_lock:
+            mode = self.settings.get("dsd_output") or "pcm"
+            status = await self.mpd.status()
+            reopen = False
+            if status.get("state") == "play":
+                song = await self.mpd.current_song()
+                is_dsd = PurePosixPath(song.get("file") or "").suffix.lower() in DSD_EXTENSIONS
+                reopen = is_dsd or await self.outputs.dsd_mode_needs_swap(mode)
             if reopen:
-                await self.play()
-        await self.refresh_volume()
+                await self.pause()
+            try:
+                await self.outputs.apply_dsd_mode(mode)
+            finally:
+                if reopen:
+                    await self.play()
+            await self.refresh_volume()
 
     async def _reconcile_external_volume(self) -> None:
         """他クライアント等が音量を変えた場合に、その値を新しいユーザー基準にする。
@@ -845,6 +860,7 @@ class PlaybackController:
         self._bypassing = bypass
         if bypass or was_bypassing:
             fade = 0.0
+        self._watch_dsd_end(status.get("songid") if bypass else None)
         try:
             current = int(status.get("volume", -1))
         except (TypeError, ValueError):
@@ -904,6 +920,48 @@ class PlaybackController:
         # 今が DSD のバイパス中でも、DSD は音量で変わらないので先に下げてよい
         self._bypassing = False
         await self._send_volume(effective)
+
+    def _watch_dsd_end(self, song_id: str | None) -> None:
+        """DSD の曲の終わり際に、次の曲の音量を先に入れる見張りを（張り直す）。
+
+        ``song_id`` が None なら見張りをやめる（DSD の音量バイパスでない）。
+        """
+        if self._handover_task is not None and not self._handover_task.done():
+            if song_id is not None and getattr(self._handover_task, "song_id", None) == song_id:
+                return   # 同じ曲を見張っている（スライダー操作などで呼ばれた）
+            self._handover_task.cancel()
+        self._handover_task = None
+        if song_id is None:
+            return
+        task = asyncio.create_task(self._hand_over_from_dsd(song_id))
+        task.song_id = song_id  # type: ignore[attr-defined]
+        self._handover_task = task
+
+    async def _hand_over_from_dsd(self, song_id: str) -> None:
+        """DSD の曲が残り :data:`DSD_HANDOVER_SECONDS` になったら、次の曲の音量を入れる。
+
+        自然な曲の変わり目で DSD から PCM へ移るときのためのもの。曲送りと
+        曲戻しは :meth:`_preset_loudness` が送る前に入れている。シークや
+        一時停止で残り時間が変わるので、寝て待たずに 1 秒おきに確かめる。
+        次も DSD なら何もしない（:meth:`_preset_loudness` が見送る）。
+        """
+        try:
+            while True:
+                status = await self.mpd.status()
+                if status.get("songid") != song_id or not self._bypassing:
+                    return
+                wait = 1.0
+                elapsed = _float_or_none(status.get("elapsed"))
+                duration = _float_or_none(status.get("duration"))
+                if status.get("state") == "play" and elapsed is not None and duration:
+                    remaining = duration - elapsed
+                    if remaining <= DSD_HANDOVER_SECONDS:
+                        await self._preset_loudness(_int_or_none(status.get("nextsong")))
+                        return
+                    wait = min(remaining - DSD_HANDOVER_SECONDS, 1.0)
+                await asyncio.sleep(wait)
+        except MPDUnavailable:
+            return
 
     async def _send_volume(self, value: int) -> None:
         self._last_sent_volume = value
