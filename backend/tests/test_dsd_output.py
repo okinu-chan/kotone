@@ -190,6 +190,24 @@ async def test_dsd_hands_over_to_the_next_pcm_volume_before_it_ends(
     assert mpd.volumes == expected
 
 
+async def test_seeking_back_after_the_handover_restores_full_scale(db, settings) -> None:
+    mpd = _EndingMPD(remaining=1.5)
+    mpd.queue_items = [{"file": "a.dsf"}, {"file": "b.flac"}]
+    mpd.song = {"file": "a.dsf"}
+    ctrl = _ctrl(db, settings, mpd, _Outputs())
+    ctrl.user_volume = 80
+    await ctrl._on_song_changed()
+    await ctrl._handover_task
+    assert mpd.volume == 40
+
+    mpd.elapsed = 5.0                    # 前へシーク（MPD は player イベントを出す）
+    await ctrl._on_song_changed()
+
+    assert mpd.volume == 100
+    assert ctrl._bypassing
+    ctrl._handover_task.cancel()
+
+
 async def test_handover_waits_while_the_dsd_has_time_left(db, settings) -> None:
     mpd = _EndingMPD(remaining=30.0)
     mpd.queue_items = [{"file": "a.dsf"}, {"file": "b.flac"}]

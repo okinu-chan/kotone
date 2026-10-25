@@ -222,6 +222,12 @@ class PlaybackController:
 
         song_id = status.get("songid")
         if song_id == self._last_song_id:
+            # DSD の終わり際に次の曲の音量を入れた（_hand_over_from_dsd）あとで
+            # 前へシークしたら、DSD のあいだは 100 に戻して見張り直す
+            if not self._bypassing and await self._dsd_bypass(
+                (await self.mpd.current_song()).get("file")
+            ):
+                await self._apply_loudness(status)
             return
         self._last_song_id = song_id
 
