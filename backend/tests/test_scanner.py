@@ -701,6 +701,77 @@ def test_first_scan_of_an_empty_directory_is_fine(
     assert result.added == 0
 
 
+def _write_png(path: Path, color: tuple[int, int, int]) -> None:
+    from PIL import Image  # noqa: PLC0415
+
+    Image.new("RGB", (64, 64), color).save(path, format="PNG")
+
+
+def _artwork_hash(db: Database, album: str) -> str | None:
+    return db.scalar(
+        "SELECT a.source_hash FROM artwork a JOIN albums al ON al.id = a.album_id "
+        "WHERE al.name = ?",
+        (album,),
+    )
+
+
+def test_replaced_folder_image_is_picked_up_by_a_normal_scan(
+    scan: LibraryScanner, library: Config, db: Database
+) -> None:
+    """曲が変わっていなくても、Folder.png の差し替えは通常のスキャンで反映される。"""
+    folder = library.music_dir / "Radiohead" / "OK Computer"
+    _write_png(folder / "Folder.png", (10, 20, 30))
+    scan.scan()
+    before = _artwork_hash(db, "OK Computer")
+    assert before is not None
+    old_cache = library.artwork_cache_dir / before[:2] / before
+    assert old_cache.is_dir()
+
+    _write_png(folder / "Folder.png", (200, 100, 50))
+    result = scan.scan()
+
+    after = _artwork_hash(db, "OK Computer")
+    assert after is not None and after != before
+    assert result.updated == 0             # 曲は読み直していない
+    assert result.artwork_updated == 1
+    # 古い画像のキャッシュは片付けられる
+    assert not old_cache.exists()
+    assert (library.artwork_cache_dir / after[:2] / after).is_dir()
+
+
+def test_unchanged_folder_images_are_not_reloaded(
+    scan: LibraryScanner, library: Config, db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_png(library.music_dir / "Radiohead" / "OK Computer" / "Folder.png", (1, 2, 3))
+    scan.scan()
+
+    loaded: list[Path] = []
+    original = scanner_module.load_source
+
+    def counting_load_source(path: Path):  # noqa: ANN202
+        loaded.append(path)
+        return original(path)
+
+    monkeypatch.setattr(scanner_module, "load_source", counting_load_source)
+    scan.scan()
+    # 画像のあるアルバムは読まない（画像の無いアルバムは従来どおり毎回探す）
+    assert all("OK Computer" not in str(p) for p in loaded)
+
+
+def test_signature_is_backfilled_for_existing_artwork(
+    scan: LibraryScanner, library: Config, db: Database
+) -> None:
+    """移行直後（署名が NULL）は一度だけ確認し、画像が同じなら作り直さない。"""
+    _write_png(library.music_dir / "Radiohead" / "OK Computer" / "Folder.png", (1, 2, 3))
+    scan.scan()
+    db.execute("UPDATE artwork SET folder_sig = NULL")
+    db.commit()
+
+    result = scan.scan()
+    assert result.artwork_updated == 0
+    assert db.scalar("SELECT COUNT(*) FROM artwork WHERE folder_sig IS NULL") == 0
+
+
 def test_blind_spot_matching() -> None:
     assert scanner_module._is_under("Radiohead/OK Computer/01.flac", ["Radiohead"])
     assert scanner_module._is_under("a.flac", ["a.flac"])

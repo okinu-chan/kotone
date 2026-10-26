@@ -124,13 +124,22 @@ class ScanStore {
   total = $state(0);
   error = $state(null);
   summary = $state(null);
+  /**
+   * スキャンが終わるたびに 1 つ増える。表示中の画面はこれを見て一覧を読み直す
+   * （アートワークの差し替えなどを、ブラウザを更新せずに反映するため）。
+   */
+  generation = $state(0);
 
   running = $derived(this.status === 'running');
   percent = $derived(this.total > 0 ? Math.round((this.processed / this.total) * 100) : 0);
 
   update(payload) {
     if (!payload) return;
+    const wasRunning = this.status === 'running';
     this.status = payload.running ? 'running' : (payload.status ?? this.status);
+    if (wasRunning && this.status === 'idle') {
+      this.generation += 1;
+    }
     this.phase = payload.phase ?? '';
     this.processed = payload.processed ?? 0;
     this.total = payload.total ?? 0;

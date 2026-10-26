@@ -13,8 +13,9 @@
   import ArtistEditor from './ArtistEditor.svelte';
   import PageHeader from './PageHeader.svelte';
   import TrackList from './TrackList.svelte';
+  import { untrack } from 'svelte';
   import { api } from '../api.js';
-  import { libraryView, player, toast } from '../stores.svelte.js';
+  import { libraryView, player, scan, toast } from '../stores.svelte.js';
   import { router } from '../router.svelte.js';
 
   let { id } = $props();
@@ -37,6 +38,23 @@
       .catch((error) => toast.error(error.detail || String(error)))
       .finally(() => {
         loading = false;
+      });
+  });
+
+  // 表示中にスキャンが終わったら、タブを保ったままその場で読み直す
+  let seenGeneration = untrack(() => scan.generation);
+  $effect(() => {
+    const generation = scan.generation;
+    if (generation === seenGeneration) return;
+    seenGeneration = generation;
+    const artistId = untrack(() => id);
+    api
+      .artist(artistId)
+      .then((payload) => {
+        if (artistId === id) artist = payload;
+      })
+      .catch(() => {
+        /* アーティストが消えていても、ここで知らせることはない */
       });
   });
 

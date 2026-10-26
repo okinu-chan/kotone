@@ -7,9 +7,10 @@
   import PageHeader from './PageHeader.svelte';
   import TagEditor from './TagEditor.svelte';
   import TrackList from './TrackList.svelte';
+  import { untrack } from 'svelte';
   import { api } from '../api.js';
   import { formatDuration } from '../format.js';
-  import { player, toast } from '../stores.svelte.js';
+  import { player, scan, toast } from '../stores.svelte.js';
   import { router } from '../router.svelte.js';
 
   let { id } = $props();
@@ -87,6 +88,23 @@
       .catch((error) => toast.error(error.detail || String(error)))
       .finally(() => {
         loading = false;
+      });
+  });
+
+  // 表示中にスキャンが終わったら、その場で読み直す（アートワークの差し替えを反映する）
+  let seenGeneration = untrack(() => scan.generation);
+  $effect(() => {
+    const generation = scan.generation;
+    if (generation === seenGeneration) return;
+    seenGeneration = generation;
+    const albumId = untrack(() => id);
+    api
+      .album(albumId)
+      .then((payload) => {
+        if (albumId === id) album = payload;
+      })
+      .catch(() => {
+        /* アルバムが消えていても、ここで知らせることはない */
       });
   });
 

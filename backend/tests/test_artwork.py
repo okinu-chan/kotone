@@ -7,7 +7,13 @@ from pathlib import Path
 
 from PIL import Image
 
-from kotone.library.artwork import TIERS, ArtworkCache, _decode, find_folder_image
+from kotone.library.artwork import (
+    TIERS,
+    ArtworkCache,
+    _decode,
+    find_folder_image,
+    folder_signature,
+)
 
 
 def _png_bytes(width: int, height: int) -> bytes:
@@ -97,6 +103,49 @@ def test_find_folder_image_prefers_cover(tmp_path: Path) -> None:
 
 def test_find_folder_image_returns_none_for_empty_dir(tmp_path: Path) -> None:
     assert find_folder_image(tmp_path) is None
+
+
+def test_folder_signature_changes_when_the_image_is_replaced(tmp_path: Path) -> None:
+    image = tmp_path / "Folder.png"
+    image.write_bytes(_png_bytes(10, 10))
+    before = folder_signature(tmp_path)
+    assert before is not None and before.startswith("Folder.png|")
+
+    image.write_bytes(_png_bytes(20, 20))
+    assert folder_signature(tmp_path) != before
+
+
+def test_folder_signature_follows_a_renamed_image(tmp_path: Path) -> None:
+    """Folder.png を Folder.jpg に替えた場合も別の署名になる。"""
+    (tmp_path / "Folder.png").write_bytes(_png_bytes(10, 10))
+    before = folder_signature(tmp_path)
+    (tmp_path / "Folder.png").unlink()
+    (tmp_path / "Folder.jpg").write_bytes(_png_bytes(10, 10))
+    after = folder_signature(tmp_path)
+    assert after is not None and after.startswith("Folder.jpg|")
+    assert after != before
+
+
+def test_folder_signature_without_image_or_folder(tmp_path: Path) -> None:
+    assert folder_signature(tmp_path) == ""
+    # フォルダが無い（読めない）ときは「分からない」
+    assert folder_signature(tmp_path / "missing") is None
+
+
+def test_prune_removes_only_unused_cache(tmp_path: Path) -> None:
+    cache = ArtworkCache(tmp_path)
+    kept = _decode(_png_bytes(400, 400), "folder", "a.png")
+    dropped = _decode(_png_bytes(300, 300), "folder", "b.png")
+    assert kept is not None and dropped is not None
+    cache.generate(kept)
+    cache.generate(dropped)
+    unrelated = tmp_path / "notes"
+    unrelated.mkdir()
+
+    assert cache.prune({kept.digest}) == 1
+    assert (tmp_path / cache.relative_dir(kept.digest)).is_dir()
+    assert not (tmp_path / cache.relative_dir(dropped.digest)).exists()
+    assert unrelated.is_dir()
 
 
 def test_decode_rejects_non_image() -> None:

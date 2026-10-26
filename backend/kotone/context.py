@@ -104,6 +104,11 @@ class ScanManager:
             ctx.events.publish("scan", {"status": "error", "error": str(exc)})
             raise
         ctx.events.publish("scan", {"status": "idle", **result.as_dict()})
+        # 再生中の曲のアートワークが差し替わっていれば、再生画面にも新しいハッシュを届ける
+        try:
+            await ctx.player.broadcast_state()
+        except Exception as exc:
+            log.warning("スキャン後の再生状態の通知に失敗しました: %s", exc)
         return result
 
     def _publish_progress(self, phase: str, processed: int, total: int) -> None:

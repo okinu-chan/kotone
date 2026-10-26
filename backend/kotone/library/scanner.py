@@ -26,7 +26,7 @@ from typing import Any
 from kotone.config import Config
 from kotone.db import Database
 from kotone.library.artists import split_artists
-from kotone.library.artwork import ArtworkCache, load_source
+from kotone.library.artwork import ArtworkCache, folder_signature, load_source
 from kotone.library.loudness import LoudnessScanner
 from kotone.library.tags import TrackTags, is_audio_file, read_tags
 from kotone.settings import SettingsStore
@@ -45,6 +45,7 @@ class ScanResult:
     unchanged: int = 0
     removed: int = 0
     albums_with_artwork: int = 0
+    artwork_updated: int = 0
     tracks_measured: int = 0
     errors: list[str] = field(default_factory=list)
     duration_seconds: float = 0.0
@@ -56,6 +57,7 @@ class ScanResult:
             "unchanged": self.unchanged,
             "removed": self.removed,
             "albums_with_artwork": self.albums_with_artwork,
+            "artwork_updated": self.artwork_updated,
             "tracks_measured": self.tracks_measured,
             "errors": self.errors[:50],
             "duration_seconds": round(self.duration_seconds, 1),
@@ -663,7 +665,8 @@ class LibraryScanner:
             missing = self.db.query(
                 "SELECT id FROM albums WHERE id NOT IN (SELECT album_id FROM artwork)"
             )
-            album_ids = sorted(dirty_albums | {int(r["id"]) for r in missing})
+            replaced = self._albums_with_replaced_folder_image()
+            album_ids = sorted(dirty_albums | replaced | {int(r["id"]) for r in missing})
 
         total = len(album_ids)
         self._set_state(phase="アートワークを生成中", processed=0, total=total)
@@ -671,7 +674,7 @@ class LibraryScanner:
 
         for index, album_id in enumerate(album_ids, start=1):
             try:
-                if self._sync_album_artwork(album_id, force=full):
+                if self._sync_album_artwork(album_id, force=full, result=result):
                     result.albums_with_artwork += 1
             except Exception as exc:
                 log.exception("アートワーク生成に失敗: album_id=%s", album_id)
@@ -682,7 +685,48 @@ class LibraryScanner:
                 self._progress(phase, index, total)
                 self._set_state(phase=phase, processed=index)
 
-    def _sync_album_artwork(self, album_id: int, *, force: bool) -> bool:
+        # 差し替えやアルバムの削除で使われなくなったキャッシュを片付ける
+        keep = {r["source_hash"] for r in self.db.query("SELECT source_hash FROM artwork")}
+        pruned = self.artwork_cache.prune(keep)
+        if pruned:
+            log.info("使われなくなったアートワークのキャッシュを %d 件削除しました", pruned)
+
+    def _albums_with_replaced_folder_image(self) -> set[int]:
+        """フォルダ画像が前回のスキャンから変わったアルバムを探す。
+
+        曲ファイルが変わっていないアルバムは通常のスキャンで作り直さないため、
+        Folder.png だけを差し替えた場合はここで拾う。見るのはフォルダの一覧と
+        画像ファイルの属性だけで、画像の中身は読まない。
+        """
+        rows = self.db.query(
+            """
+            SELECT t.album_id, t.path, a.folder_sig
+            FROM artwork a
+            JOIN tracks t ON t.album_id = a.album_id AND t.missing = 0
+            ORDER BY t.album_id, t.disc_no, t.track_no, t.path
+            """
+        )
+        # _sync_album_artwork と同じく、アルバムの先頭の曲のフォルダを見る
+        first: dict[int, tuple[str, str | None]] = {}
+        for row in rows:
+            first.setdefault(int(row["album_id"]), (row["path"], row["folder_sig"]))
+
+        total = len(first)
+        self._set_state(phase="アートワークの差し替えを確認中", processed=0, total=total)
+        replaced: set[int] = set()
+        for index, (album_id, (path, stored)) in enumerate(first.items(), start=1):
+            signature = folder_signature((self.config.music_dir / path).parent)
+            # 読めないフォルダは変わったかどうか分からないので触らない
+            if signature is not None and signature != stored:
+                replaced.add(album_id)
+            if index % 100 == 0 or index == total:
+                self._progress("アートワークの差し替えを確認中", index, total)
+                self._set_state(processed=index)
+        return replaced
+
+    def _sync_album_artwork(
+        self, album_id: int, *, force: bool, result: ScanResult | None = None
+    ) -> bool:
         row = self.db.query_one(
             "SELECT path FROM tracks WHERE album_id = ? AND missing = 0 "
             "ORDER BY disc_no, track_no, path LIMIT 1",
@@ -692,16 +736,24 @@ class LibraryScanner:
             return False
 
         track_path = self.config.music_dir / row["path"]
+        # 画像を読む前に取る。読んでいる間に差し替えられても次のスキャンで拾える
+        signature = folder_signature(track_path.parent)
         source = load_source(track_path)
         if source is None:
             self.db.execute("DELETE FROM artwork WHERE album_id = ?", (album_id,))
             return False
 
         existing = self.db.query_one(
-            "SELECT id, source_hash FROM artwork WHERE album_id = ?", (album_id,)
+            "SELECT id, source_hash, folder_sig FROM artwork WHERE album_id = ?", (album_id,)
         )
         digest = source.digest
         if existing is not None and existing["source_hash"] == digest and not force:
+            if existing["folder_sig"] != signature:
+                # 画像は同じ（埋め込み画像が優先されている、属性だけ変わった等）
+                self.db.execute(
+                    "UPDATE artwork SET folder_sig = ? WHERE id = ?",
+                    (signature, existing["id"]),
+                )
             return True
 
         tiers = self.artwork_cache.generate(source, force=force)
@@ -712,11 +764,12 @@ class LibraryScanner:
             cursor = self.db.execute(
                 """
                 INSERT INTO artwork
-                    (album_id, source_kind, source_path, source_hash, src_width, src_height)
-                VALUES (?, ?, ?, ?, ?, ?)
+                    (album_id, source_kind, source_path, source_hash, src_width, src_height,
+                     folder_sig)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (album_id, source.kind, source.source_path, digest,
-                 source.width, source.height),
+                 source.width, source.height, signature),
             )
             artwork_id = int(cursor.lastrowid)
         else:
@@ -724,13 +777,15 @@ class LibraryScanner:
             self.db.execute(
                 """
                 UPDATE artwork SET source_kind = ?, source_path = ?, source_hash = ?,
-                    src_width = ?, src_height = ?, updated_at = datetime('now')
+                    src_width = ?, src_height = ?, folder_sig = ?, updated_at = datetime('now')
                 WHERE id = ?
                 """,
                 (source.kind, source.source_path, digest,
-                 source.width, source.height, artwork_id),
+                 source.width, source.height, signature, artwork_id),
             )
             self.db.execute("DELETE FROM artwork_files WHERE artwork_id = ?", (artwork_id,))
+            if existing["source_hash"] != digest and result is not None:
+                result.artwork_updated += 1
 
         for tier in tiers:
             self.db.execute(

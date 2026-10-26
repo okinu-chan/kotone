@@ -42,6 +42,9 @@ FOLDER_IMAGE_NAMES: tuple[str, ...] = (
 
 _IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"})
 
+#: キャッシュのディレクトリ名に使うハッシュの桁数
+_DIGEST_LENGTH = 16
+
 
 @dataclass
 class ArtworkSource:
@@ -53,7 +56,7 @@ class ArtworkSource:
 
     @property
     def digest(self) -> str:
-        return hashlib.sha256(self.data).hexdigest()[:16]
+        return hashlib.sha256(self.data).hexdigest()[:_DIGEST_LENGTH]
 
     @property
     def short_side(self) -> int:
@@ -146,9 +149,33 @@ def find_folder_image(directory: Path) -> Path | None:
     if not directory.is_dir():
         return None
     try:
-        entries = {p.name.lower(): p for p in directory.iterdir() if p.is_file()}
+        return _pick_folder_image(directory)
     except OSError:
         return None
+
+
+def folder_signature(directory: Path) -> str | None:
+    """フォルダ画像の差し替えを検出するための署名。
+
+    採用されるフォルダ画像の名前・サイズ・更新日時・変更日時をつなげる。
+    変更日時（ctime）は Pi 側でファイルが置き換わった時刻なので、コピーで
+    更新日時が元のまま残っても差し替えを見逃さない。画像が無ければ空文字。
+    フォルダを読めないときは None（変化したかどうか分からない）。
+    """
+    if not directory.is_dir():
+        return None
+    try:
+        image = _pick_folder_image(directory)
+        if image is None:
+            return ""
+        stat = image.stat()
+    except OSError:
+        return None
+    return f"{image.name}|{stat.st_size}|{stat.st_mtime_ns}|{stat.st_ctime_ns}"
+
+
+def _pick_folder_image(directory: Path) -> Path | None:
+    entries = {p.name.lower(): p for p in directory.iterdir() if p.is_file()}
 
     for name in FOLDER_IMAGE_NAMES:
         found = entries.get(name)
@@ -290,6 +317,37 @@ class ArtworkCache:
         target = self.cache_dir / self.relative_dir(digest)
         if target.exists():
             shutil.rmtree(target, ignore_errors=True)
+
+    def prune(self, keep: set[str]) -> int:
+        """どのアルバムからも使われていないキャッシュを消す。消した数を返す。
+
+        ``<ハッシュ先頭 2 文字>/<ハッシュ>/`` の形をしたディレクトリだけを対象にし、
+        それ以外のものには触れない。
+        """
+        if not self.cache_dir.is_dir():
+            return 0
+        removed = 0
+        for bucket in self.cache_dir.iterdir():
+            if not bucket.is_dir() or not _is_hex(bucket.name, 2):
+                continue
+            for entry in bucket.iterdir():
+                if (
+                    entry.is_dir()
+                    and _is_hex(entry.name, _DIGEST_LENGTH)
+                    and entry.name.startswith(bucket.name)
+                    and entry.name not in keep
+                ):
+                    shutil.rmtree(entry, ignore_errors=True)
+                    removed += 1
+            try:
+                bucket.rmdir()  # 空になったときだけ消える
+            except OSError:
+                pass
+        return removed
+
+
+def _is_hex(name: str, length: int) -> bool:
+    return len(name) == length and all(c in "0123456789abcdef" for c in name)
 
 
 def _to_savable_mode(image: Image.Image) -> Image.Image:

@@ -9,9 +9,10 @@
   import FilterSheet from './FilterSheet.svelte';
   import InitialSearch from './InitialSearch.svelte';
   import PageHeader from './PageHeader.svelte';
+  import { untrack } from 'svelte';
   import { api } from '../api.js';
   import { router } from '../router.svelte.js';
-  import { libraryView, settings, toast } from '../stores.svelte.js';
+  import { libraryView, scan, settings, toast } from '../stores.svelte.js';
 
   const VIEWS = [
     { key: 'albums', label: 'アルバム' },
@@ -60,24 +61,51 @@
 
 
 
-  $effect(() => {
-    const currentView = libraryView.view;
-    // 頭出しの指定はここで読んで、この effect の依存に入れる。並び順が
-    // 変わる場合は一覧を読み直したあとに飛ばないと位置がずれる
-    const jump = libraryView.pendingJump;
-    // 頭文字は絞り込みに使わない（イニシャルサーチは頭出し）。一覧は全件のまま
-    const params = {
+  /** いまの表示条件で一覧を読み込む。頭文字は絞り込みに使わない（イニシャルサーチは頭出し）。 */
+  function currentParams() {
+    return {
       sort: libraryView.sort,
       codec: libraryView.codec,
       quality: libraryView.quality,
       recent: libraryView.recent || undefined,
     };
+  }
+
+  async function fetchView(currentView, params) {
+    if (currentView === 'albums') {
+      const payload = await api.albums(params);
+      albums = payload.items;
+      total = payload.total;
+    } else if (currentView === 'artists') {
+      const payload = await api.artists();
+      artists = payload.items;
+      total = payload.total;
+    } else if (currentView === 'genres') {
+      const payload = await api.genres();
+      genres = payload.items;
+      total = payload.total;
+    } else {
+      const payload = await api.years();
+      years = payload.items;
+      total = payload.total;
+    }
+  }
+
+  $effect(() => {
+    const currentView = libraryView.view;
+    // 頭出しの指定はここで読んで、この effect の依存に入れる。並び順が
+    // 変わる場合は一覧を読み直したあとに飛ばないと位置がずれる
+    const jump = libraryView.pendingJump;
+    const params = currentParams();
 
     // 条件が前回と同じなら、取得済みの一覧をそのまま出す。
     // 1,000 件規模では再取得と再描画だけで待たされるため、
     // 他画面から戻ったときに読み込み待ちを挟まないようにする。
+    // ただし、取得したあとにスキャンが終わっていれば中身が古いので使わない。
+    // 表示中に終わった場合は下の effect が読み直すので、ここの依存には入れない
     const key = libraryView.cacheKey;
-    if (libraryView.cache.key === key) {
+    const generation = untrack(() => scan.generation);
+    if (libraryView.cache.key === key && libraryView.cache.generation === generation) {
       const cached = libraryView.cache;
       albums = cached.albums;
       artists = cached.artists;
@@ -92,29 +120,9 @@
 
     loading = true;
 
-    const load = async () => {
-      if (currentView === 'albums') {
-        const payload = await api.albums(params);
-        albums = payload.items;
-        total = payload.total;
-      } else if (currentView === 'artists') {
-        const payload = await api.artists();
-        artists = payload.items;
-        total = payload.total;
-      } else if (currentView === 'genres') {
-        const payload = await api.genres();
-        genres = payload.items;
-        total = payload.total;
-      } else {
-        const payload = await api.years();
-        years = payload.items;
-        total = payload.total;
-      }
-    };
-
-    load()
+    fetchView(currentView, params)
       .then(() => {
-        libraryView.cache = { key, albums, artists, genres, years, total };
+        libraryView.cache = { key, generation, albums, artists, genres, years, total };
       })
       .catch((error) => toast.error(error.detail || String(error)))
       .finally(() => {
@@ -122,6 +130,23 @@
         restoreScroll();
         applyJump(jump);
       });
+  });
+
+  // 表示中にスキャンが終わったら、スピナーを出さずにその場で読み直す。
+  // アートワークの URL にはハッシュが入るので、差し替えた画像に切り替わる
+  let seenGeneration = untrack(() => scan.generation);
+  $effect(() => {
+    const generation = scan.generation;
+    if (generation === seenGeneration) return;
+    seenGeneration = generation;
+    untrack(() => {
+      const key = libraryView.cacheKey;
+      fetchView(libraryView.view, currentParams())
+        .then(() => {
+          libraryView.cache = { key, generation, albums, artists, genres, years, total };
+        })
+        .catch((error) => toast.error(error.detail || String(error)));
+    });
   });
 
   /**

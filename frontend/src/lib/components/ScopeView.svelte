@@ -8,8 +8,9 @@
   import AlbumList from './AlbumList.svelte';
   import PageHeader from './PageHeader.svelte';
   import TrackList from './TrackList.svelte';
+  import { untrack } from 'svelte';
   import { api } from '../api.js';
-  import { libraryView, player, toast } from '../stores.svelte.js';
+  import { libraryView, player, scan, toast } from '../stores.svelte.js';
   import { router } from '../router.svelte.js';
 
   /** kind は 'genre' | 'year' */
@@ -51,6 +52,27 @@
       .catch((error) => toast.error(error.detail || String(error)))
       .finally(() => {
         loading = false;
+      });
+  });
+
+  // 表示中にスキャンが終わったら、アルバムの一覧だけその場で読み直す
+  let seenGeneration = untrack(() => scan.generation);
+  $effect(() => {
+    const generation = scan.generation;
+    if (generation === seenGeneration) return;
+    seenGeneration = generation;
+    const [currentKind, currentValue] = untrack(() => [kind, value]);
+    const params =
+      currentKind === 'genre'
+        ? { genre_id: Number(currentValue) }
+        : { year: Number(currentValue) };
+    api
+      .albums({ ...params, sort: 'album' })
+      .then((payload) => {
+        if (currentKind === kind && currentValue === value) albums = payload.items;
+      })
+      .catch(() => {
+        /* 読み直せなくても、表示中の一覧はそのまま使える */
       });
   });
 
