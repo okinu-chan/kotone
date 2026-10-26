@@ -408,9 +408,16 @@ class LibraryScanner:
             result.added += 1
         else:
             track_id = int(existing["id"])
-            if not existing["reading_locked"]:
+            if existing["reading_locked"]:
+                # 曲名と読みは手で直したもの（editing.py は両方まとめてロックする）
+                del values["title"]
+            else:
                 values.update(reading=reading, sort_key=sort_key, initial=initial,
                               initial_group=group)
+            if existing["tags_locked"]:
+                # 手で直したディスク番号・トラック番号・年は、ファイルが変わっても残す
+                for column in ("disc_no", "track_no", "year"):
+                    del values[column]
             assignments = ", ".join(f"{k} = ?" for k in values)
             self.db.execute(
                 f"UPDATE tracks SET {assignments}, missing = 0, "
@@ -744,15 +751,20 @@ class LibraryScanner:
             return False
 
         existing = self.db.query_one(
-            "SELECT id, source_hash, folder_sig FROM artwork WHERE album_id = ?", (album_id,)
+            "SELECT id, source_kind, source_path, source_hash, folder_sig "
+            "FROM artwork WHERE album_id = ?",
+            (album_id,),
         )
         digest = source.digest
         if existing is not None and existing["source_hash"] == digest and not force:
-            if existing["folder_sig"] != signature:
-                # 画像は同じ（埋め込み画像が優先されている、属性だけ変わった等）
+            if (existing["folder_sig"], existing["source_kind"], existing["source_path"]) != (
+                signature, source.kind, source.source_path
+            ):
+                # 画像は同じ。属性だけ変わった、取得元が埋め込みからフォルダへ移った等
                 self.db.execute(
-                    "UPDATE artwork SET folder_sig = ? WHERE id = ?",
-                    (signature, existing["id"]),
+                    "UPDATE artwork SET folder_sig = ?, source_kind = ?, source_path = ? "
+                    "WHERE id = ?",
+                    (signature, source.kind, source.source_path, existing["id"]),
                 )
             return True
 

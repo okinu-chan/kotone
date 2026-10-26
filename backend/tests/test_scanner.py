@@ -173,6 +173,32 @@ def test_manual_reading_is_preserved_on_rescan(scan: LibraryScanner, db: Databas
     assert row["reading_locked"] == 1
 
 
+def test_manual_title_and_numbers_survive_a_changed_file(
+    scan: LibraryScanner, library: Config, db: Database
+) -> None:
+    """ファイルが書き換わってタグを読み直しても、手で直した曲名・番号・年は残る。"""
+    scan.scan()
+    track_id = db.scalar("SELECT id FROM tracks WHERE title = 'Automatic'")
+    db.execute(
+        "UPDATE tracks SET title = 'Automatic (Edit)', reading = 'おーとまちっく', "
+        "reading_locked = 1, disc_no = 2, track_no = 9, year = 2001, tags_locked = 1 "
+        "WHERE id = ?",
+        (track_id,),
+    )
+    db.commit()
+
+    path = library.music_dir / "宇多田ヒカル/First Love/01 Automatic.flac"
+    path.write_bytes(b"\x00" * 64)       # サイズが変わる＝タグを読み直す
+    result = scan.scan()
+    assert result.updated == 1
+
+    row = db.query_one("SELECT * FROM tracks WHERE id = ?", (track_id,))
+    assert row["title"] == "Automatic (Edit)"
+    assert row["reading"] == "おーとまちっく"
+    assert (row["disc_no"], row["track_no"], row["year"]) == (2, 9, 2001)
+    assert row["size"] == 64
+
+
 def test_manual_artist_links_are_preserved_on_rescan(scan: LibraryScanner,
                                                      db: Database) -> None:
     scan.scan()
