@@ -20,11 +20,11 @@ KOTONE の変更を新しい順に記録します。バージョン番号（`bac
 - Bluetooth チップの自動復旧（`kotone-bluetooth-recover`、1 分おきのタイマー）。
   チップが `hardware error` で止まり HCI Reset に応答しなくなったら、ドライバを
   付け直してファームウェアを読み込み直す。EAH-AZ100 へ LDAC で再生中に発生し、
-  再起動するまで Bluetooth を使えなくなっていた
+  再起動するまで Bluetooth を使えなくなっていた `ef10e08`
 
 ### 修正
 - Bluetooth の電源を入れられないときなどに、Internal Server Error ではなく理由を
-  画面に出す
+  画面に出す `ef10e08`
 
 ## 2026-10-26
 
