@@ -278,10 +278,18 @@ install -m 644 "${PREFIX}/systemd/kotone-storage-recover.timer" /etc/systemd/sys
 install -m 644 "${PREFIX}/config/99-kotone-storage.rules" /etc/udev/rules.d/
 udevadm control --reload-rules >/dev/null 2>&1 || true
 
+# Bluetooth チップの自動復旧（止まったチップを付け直す）
+info "Bluetooth チップの自動復旧を登録します"
+install -m 755 "${PREFIX}/scripts/kotone-bluetooth-recover" /usr/local/sbin/kotone-bluetooth-recover
+install -m 644 "${PREFIX}/systemd/kotone-bluetooth-recover.service" /etc/systemd/system/
+install -m 644 "${PREFIX}/systemd/kotone-bluetooth-recover.timer" /etc/systemd/system/
+
 systemctl daemon-reload
 systemctl enable kotone >/dev/null 2>&1
 systemctl enable --now kotone-storage-recover.timer >/dev/null 2>&1 \
   || warn "音楽用ドライブの見回りタイマーを有効にできませんでした"
+systemctl enable --now kotone-bluetooth-recover.timer >/dev/null 2>&1 \
+  || warn "Bluetooth チップの見回りタイマーを有効にできませんでした"
 systemctl restart kotone
 
 # --------------------------------------------------------------- 初期スキャン

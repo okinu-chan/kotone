@@ -97,6 +97,8 @@ MPD                                          └─ rsgain / ffmpeg（ラウド�
 | `bluealsa.service` | Bluetooth の音声を ALSA に見せる。KOTONE 用の起動オプションを上書きする | `install.sh` が drop-in を書く |
 | `kotone-storage-recover.timer` | 音楽用ドライブの見回り（2 分おき）。root で動く | `systemd/kotone-storage-recover.timer` |
 | `kotone-storage-recover@.service` | 音楽用ドライブの自動復旧（udev とタイマーから起動） | `systemd/kotone-storage-recover@.service` |
+| `kotone-bluetooth-recover.timer` | Bluetooth チップの見回り（1 分おき）。root で動く | `systemd/kotone-bluetooth-recover.timer` |
+| `kotone-bluetooth-recover.service` | Bluetooth チップの自動復旧（タイマーから起動） | `systemd/kotone-bluetooth-recover.service` |
 
 `kotone.service` の主な指定: `Restart=on-failure`、`Nice=5`、`LimitNOFILE=8192`、
 `ProtectSystem=strict`（書き込みはデータ領域だけ許可）、`NoNewPrivileges=true`。
@@ -165,7 +167,8 @@ MPD                                          └─ rsgain / ffmpeg（ラウド�
 ├── scripts/
 │   ├── kotone-update        更新コマンド（/usr/local/bin に入る）
 │   ├── kotone-cli-wrapper   kotone-cli のラッパー（/usr/local/bin/kotone-cli）
-│   └── kotone-storage-recover   ドライブの自動復旧（/usr/local/sbin に入る）
+│   ├── kotone-storage-recover   ドライブの自動復旧（/usr/local/sbin に入る）
+│   └── kotone-bluetooth-recover Bluetooth チップの自動復旧（/usr/local/sbin に入る）
 ├── docs/                    要件定義書・設計メモ・インストール手順・アートワーク推奨仕様
 ├── install.sh / uninstall.sh
 ├── SPEC.md / CHANGELOG.md / README.md / LICENSE（MIT）
@@ -707,6 +710,13 @@ Bluetooth 出力は、そのレートに固定します（`allowed_formats`。�
 - **高音質コーデックの優先**（設定がオンのとき）: 画面からペアリング・接続した 1 秒後に、
   使えるうちで一番上位のコーデックへ切り替えます。優先順は LDAC → aptX HD → aptX → AAC → SBC です。
 - 接続中のコーデックは 5 秒間キャッシュします。再生中画面と設定画面に表示します。
+- **チップの自動復旧**（`scripts/kotone-bluetooth-recover`、root、1 分おき）:
+  カーネルのログで、最後のファームウェア読み込みより後に HCI Reset の失敗
+  （`Opcode 0x0c03 failed`）があり、アダプタの電源が切れていれば、`hci_uart_bcm`
+  ドライバを付け直してファームウェアを読み込み直します。上限は 1 時間に 3 回です。
+  利用者が電源を切っただけのときは、リセットの失敗が無いので何もしません。
+- Bluetooth の操作の失敗は、画面に理由を出します。電源の切り替えやペアリングなどの
+  想定した失敗は 400、BlueZ からのそれ以外のエラーは 502 です（`_guard`）。
 
 ### 4.14 コマンドラインツール（`kotone-cli`、`cli.py`）
 
@@ -1002,6 +1012,7 @@ npm run build
 | 出力先は常に 1 つだけ有効にする | MPD は有効な出力すべてへ同時に流すため、同じ音が二重に鳴る | `outputs.py` |
 | Pi は送る側（a2dp-source）だけにする | 受け側を有効にすると、受信音声を DAC へ流す bluealsa-aplay が MPD と出力を奪い合う | `install.sh` |
 | 未登録の機器は、A2DP Sink の UUID が無くても種別が Audio/Video なら一覧に出す | 探索の応答に UUID を載せない機器がある。UUID だけで絞ると Technics EAH-AZ100 が一覧に出ず、ペアリングできなかった | `_is_audio_video_class` |
+| 止まった Bluetooth チップはドライバの付け直しで復旧する | 再生中にチップが `hardware error` で止まると HCI Reset に応答せず、電源の入れ直しでは戻らなかった。ファームウェアを読み込み直す必要がある | `scripts/kotone-bluetooth-recover` |
 | Bluetooth は bluetoothctl を使わず D-Bus を直接使う | 対話前提の作りで出力の解析が不安定だった（エージェント登録の取りこぼし） | `bluetooth.py` |
 | Bluetooth ではウォームアップをしない | A2DP では不要で、曲頭へのシークが原因で鳴り始めの数秒が途切れた | `_start_with_warmup` |
 | Bluetooth へ送る形式を、接続中のレートに固定する | bluez-alsa のプラグインは、求められたレートが違うと接続を設定し直す。NW-ZX300 はこれを拒否し（AVDTP OPEN を Bad State で拒否）、接続の表示を残したまま音が出なくなった | `_match_bluetooth_stream` |

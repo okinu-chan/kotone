@@ -1,0 +1,10 @@
+[Unit]
+Description=KOTONE — Bluetooth チップの見回り
+
+[Timer]
+OnBootSec=3min
+OnUnitInactiveSec=1min
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

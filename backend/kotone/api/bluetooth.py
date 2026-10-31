@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -10,6 +11,8 @@ from pydantic import BaseModel, Field
 
 from kotone.api.deps import Ctx
 from kotone.bluetooth import BluetoothError
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["bluetooth"])
 
@@ -136,8 +139,17 @@ async def forget(ctx: Ctx, body: AddressRequest) -> dict[str, Any]:
 
 
 async def _guard(awaitable):
-    """利用者向けの文言をそのまま 400 で返す。"""
+    """利用者向けの文言をそのまま 400 で返す。
+
+    BlueZ の D-Bus エラーなど想定外の失敗も、Internal Server Error ではなく
+    理由が分かる形で返す。
+    """
     try:
         return await awaitable
     except BluetoothError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        log.warning("Bluetooth の操作に失敗しました: %s", exc)
+        raise HTTPException(
+            status_code=502, detail=f"Bluetooth の操作に失敗しました（{exc}）"
+        ) from exc

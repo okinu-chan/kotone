@@ -1,0 +1,10 @@
+[Unit]
+Description=KOTONE — Bluetooth チップの自動復旧
+After=bluetooth.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/kotone-bluetooth-recover
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=kotone-bluetooth

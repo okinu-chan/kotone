@@ -5,10 +5,16 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import Any
 
-from kotone.bluetooth import A2DP_SINK_UUID, _to_device
+import pytest
+from fastapi import HTTPException
+
+from kotone import bluetooth
+from kotone.api.bluetooth import _guard
+from kotone.bluetooth import A2DP_SINK_UUID, BluetoothError, BluetoothManager, _to_device
 
 
 @dataclass
@@ -54,3 +60,40 @@ def test_not_audio_for_other_major_class() -> None:
     """大分類が Audio/Video 以外（ここでは Phone）なら音を出せる機器とみなさない。"""
     device = _to_device(_props(Class=Variant("u", 0x005A020C)))
     assert not device.audio
+
+
+class _FakeBus:
+    async def __aenter__(self):
+        return object()
+
+    async def __aexit__(self, *_exc: object) -> None:
+        return None
+
+
+def test_set_powered_failure_is_user_error(monkeypatch) -> None:
+    """チップが止まると BlueZ は D-Bus エラーで断る。利用者向けの文言にして返す。"""
+
+    async def adapter(_bus):
+        return "/org/bluez/hci0"
+
+    async def refuse(*_args):
+        raise RuntimeError("Authentication Failed")
+
+    monkeypatch.setattr(bluetooth, "_bus", _FakeBus)
+    monkeypatch.setattr(bluetooth, "_require_adapter", adapter)
+    monkeypatch.setattr(bluetooth, "_set", refuse)
+
+    with pytest.raises(BluetoothError, match="Authentication Failed"):
+        asyncio.run(BluetoothManager().set_powered(True))
+
+
+def test_guard_turns_unexpected_errors_into_http_errors() -> None:
+    """想定外の失敗を Internal Server Error にしない。"""
+
+    async def fail():
+        raise RuntimeError("Not Ready")
+
+    with pytest.raises(HTTPException) as caught:
+        asyncio.run(_guard(fail()))
+    assert caught.value.status_code == 502
+    assert "Not Ready" in caught.value.detail

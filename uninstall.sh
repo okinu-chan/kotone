@@ -26,14 +26,16 @@ warn() { printf '%s警告:%s %s\n' "${YELLOW}${BOLD}" "${RESET}" "$*" >&2; }
 info "サービスを停止します"
 systemctl disable --now kotone >/dev/null 2>&1 || true
 systemctl disable --now kotone-storage-recover.timer >/dev/null 2>&1 || true
+systemctl disable --now kotone-bluetooth-recover.timer >/dev/null 2>&1 || true
 rm -f /etc/systemd/system/kotone.service
 rm -f /etc/systemd/system/kotone-storage-recover@.service /etc/systemd/system/kotone-storage-recover.timer
+rm -f /etc/systemd/system/kotone-bluetooth-recover.service /etc/systemd/system/kotone-bluetooth-recover.timer
 rm -f /etc/udev/rules.d/99-kotone-storage.rules
 udevadm control --reload-rules >/dev/null 2>&1 || true
 systemctl daemon-reload
 
 info "コマンドを削除します"
-rm -f /usr/local/bin/kotone-update /usr/local/bin/kotone-cli /usr/local/sbin/kotone-storage-recover
+rm -f /usr/local/bin/kotone-update /usr/local/bin/kotone-cli /usr/local/sbin/kotone-storage-recover /usr/local/sbin/kotone-bluetooth-recover
 
 info "アプリを削除します: ${PREFIX}"
 rm -rf "$PREFIX"

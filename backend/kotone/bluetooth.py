@@ -140,7 +140,15 @@ class BluetoothManager:
     async def set_powered(self, powered: bool) -> None:
         async with _bus() as bus:
             path = await _require_adapter(bus)
-            await _set(bus, path, ADAPTER_IFACE, "Powered", "b", powered)
+            try:
+                await _set(bus, path, ADAPTER_IFACE, "Powered", "b", powered)
+            except Exception as exc:
+                # チップが止まると、BlueZ は "Authentication Failed" という
+                # 実態に合わない理由で断ってくる（kotone-bluetooth-recover が復旧する）
+                raise BluetoothError(
+                    "Bluetooth の電源を切り替えられませんでした。チップが止まっている場合は"
+                    f"1 分ほどで自動で復旧します。少し待ってお試しください（{exc}）"
+                ) from exc
 
     # ------------------------------------------------------------ 一覧
 

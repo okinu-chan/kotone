@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+#
+# Bluetooth チップの自動復旧（root で動く。1 分おきのタイマーから）。
+#
+# 2026-10-31、EAH-AZ100 へ LDAC で再生中に内蔵チップ（BCM43455）が
+# 「hardware error 0x00」で止まった。カーネルのリセット（HCI Reset,
+# Opcode 0x0c03）にも応答しなくなり、電源を入れ直せないまま再起動まで戻らない。
+# ここではドライバを付け直してファームウェアを読み込み直す。
+#
+# 手を出さない場面:
+#   * 最後のファームウェア読み込みより後に、リセットの失敗が記録されていないとき
+#     （利用者が Bluetooth をオフにしただけなら、ここで止まる）
+#   * アダプタの電源が入っているとき
+#   * 1 時間に 3 回を超えたとき（機材の問題。繰り返さずに人に任せる）
+#
+set -uo pipefail
+
+STATE_DIR="${KOTONE_BT_RECOVER_STATE_DIR:-/run/kotone-bluetooth}"
+DRIVER_DIR="${KOTONE_BT_DRIVER_DIR:-/sys/bus/serial/drivers/hci_uart_bcm}"
+MAX_ATTEMPTS=3
+WINDOW_SECONDS=3600
+
+mkdir -p "$STATE_DIR"
+
+exec 9>"$STATE_DIR/lock"
+flock -n 9 || exit 0      # 別の呼び出しが動いている
+
+# ---------------------------------------------------------- 止まっているか
+
+log_lines="$(dmesg --notime 2>/dev/null)" || exit 0
+last_firmware="$(grep -nE 'hci[0-9]+: BCM.* build [0-9]+' <<<"$log_lines" | tail -1 | cut -d: -f1)"
+last_failure="$(grep -nE 'hci[0-9]+: Opcode 0x0c03 failed' <<<"$log_lines" | tail -1 | cut -d: -f1)"
+
+[[ -n "$last_failure" ]] || exit 0
+(( last_failure > ${last_firmware:-0} )) || exit 0
+
+timeout 5 bluetoothctl show 2>/dev/null | grep -q 'Powered: yes' && exit 0
+
+# ------------------------------------------------------------ 回数の上限
+
+now="$(date +%s)"
+attempts_file="$STATE_DIR/attempts"
+recent="$(awk -v since=$((now - WINDOW_SECONDS)) '$1 > since' "$attempts_file" 2>/dev/null)"
+if [[ -n "$recent" ]] && (( $(wc -l <<<"$recent") >= MAX_ATTEMPTS )); then
+  echo "1 時間に ${MAX_ATTEMPTS} 回を超えたので、復旧を止めています" >&2
+  exit 1
+fi
+{ [[ -n "$recent" ]] && echo "$recent"; echo "$now"; } > "$attempts_file"
+
+# ------------------------------------------------------------ 付け直す
+
+status=1
+for link in "$DRIVER_DIR"/serial*; do
+  [[ -e "$link" ]] || continue
+  device="$(basename "$link")"
+  echo "Bluetooth チップが応答しないので、付け直します: $device"
+  echo "$device" > "$DRIVER_DIR/unbind" || continue
+  sleep 1
+  echo "$device" > "$DRIVER_DIR/bind" && status=0
+done
+exit "$status"
